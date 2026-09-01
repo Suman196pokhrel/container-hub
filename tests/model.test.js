@@ -83,3 +83,11 @@ test('parseContainerList parses multiple lines and sorts them', () => {
 test('parseContainerList skips blank lines', () => {
   assert.deepEqual(Model.parseContainerList('\n\n'), [])
 })
+
+test('statusColorFor classifies running, unhealthy, and stopped containers', () => {
+  assert.equal(Model.statusColorFor({ isRunning: true, healthStatus: 'none' }), 'running')
+  assert.equal(Model.statusColorFor({ isRunning: true, healthStatus: 'healthy' }), 'running')
+  assert.equal(Model.statusColorFor({ isRunning: true, healthStatus: 'unhealthy' }), 'unhealthy')
+  assert.equal(Model.statusColorFor({ isRunning: false, healthStatus: 'none' }), 'stopped')
+  assert.equal(Model.statusColorFor(null), 'stopped')
+})

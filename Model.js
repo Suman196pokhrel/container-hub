@@ -76,12 +76,20 @@ function parseContainerList(rawStdout) {
   return sortContainers(containers)
 }
 
+function statusColorFor(container) {
+  if (!container) return "stopped"
+  if (container.isRunning && container.healthStatus === "unhealthy") return "unhealthy"
+  if (container.isRunning) return "running"
+  return "stopped"
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parsePorts: parsePorts,
     formatPortsDisplay: formatPortsDisplay,
     parseContainerLine: parseContainerLine,
     sortContainers: sortContainers,
-    parseContainerList: parseContainerList
+    parseContainerList: parseContainerList,
+    statusColorFor: statusColorFor
   }
 }
