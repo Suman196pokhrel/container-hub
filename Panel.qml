@@ -20,6 +20,11 @@ Panel {
   property bool confirmRemoveOpen: false
   property bool logsViewOpen: false
 
+  readonly property color secondaryText: Qt.darker(root.bar.foreground, 1.4)
+  readonly property color mutedText: Qt.darker(root.bar.foreground, 1.7)
+  readonly property color quietAction: Qt.darker(root.bar.foreground, 1.65)
+  readonly property color rowHoverFill: Util.alpha(root.bar.foreground, 0.055)
+
   onOpenedChanged: {
     docker.panelOpen = root.opened
     if (root.opened) docker.refresh()
@@ -35,41 +40,40 @@ Panel {
     settings: root.settings
   }
 
-  BarIconButton {
+  WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     tooltipText: "Container Hub"
-    iconComponent: Component {
-      Item {
-        ContainerIcon {
-          anchors.centerIn: parent
-          iconSize: Style.font.icon
-          color: button.foreground
-        }
+    labelVisible: false
+    hasVisualContent: true
+    fixedWidth: vertical ? -1 : Math.max(Style.bar.iconSlot, Style.bar.iconCanvas + Style.space(22))
 
-        Rectangle {
-          visible: docker.runningCount > 0
-          anchors.right: parent.right
-          anchors.bottom: parent.bottom
-          width: Math.max(Style.space(12), countLabel.implicitWidth + Style.space(4))
-          height: Style.space(12)
-          radius: height / 2
-          color: docker.errorKind !== "" ? Color.urgent : Color.accent
+    readonly property color badgeColor: docker.errorKind !== "" ? Color.urgent : Color.muted
 
-          Text {
-            id: countLabel
-            textFormat: Text.PlainText
-            anchors.centerIn: parent
-            text: String(docker.runningCount)
-            color: Color.background
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption * 0.85
-            font.bold: true
-          }
-        }
+    RowLayout {
+      anchors.centerIn: parent
+      spacing: Style.space(7)
+
+      ContainerIcon {
+        iconSize: Style.bar.iconCanvas * 0.92
+        color: button.foreground
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      Text {
+        id: countLabel
+        visible: docker.runningCount > 0 && !button.vertical
+        Layout.alignment: Qt.AlignVCenter
+        textFormat: Text.PlainText
+        text: String(docker.runningCount)
+        color: button.badgeColor
+        opacity: docker.errorKind !== "" ? 1.0 : 0.78
+        font.family: Style.font.family
+        font.pixelSize: Math.max(8, Style.font.caption * 0.76)
       }
     }
+
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) docker.refresh()
       else root.toggle()
@@ -144,15 +148,17 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 visible: docker.errorKind === ""
-                text: docker.runningCount + " / " + docker.containers.length + " running"
-                color: Qt.darker(root.bar.foreground, 1.4)
+                text: docker.runningCount + " running · " + docker.containers.length + " total"
+                color: root.secondaryText
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
               }
 
               ActionIcon {
                 kind: "refresh"
-                foreground: root.bar.foreground
+                size: Style.space(20)
+                foreground: root.secondaryText
+                hoverColor: Color.accent
                 tooltipText: "Refresh"
                 onClicked: docker.refresh()
               }
@@ -179,7 +185,7 @@ Panel {
             visible: docker.errorKind === "" && docker.containers.length === 0
             width: parent.width
             text: "No containers found."
-            color: Qt.darker(root.bar.foreground, 1.4)
+            color: root.secondaryText
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
             horizontalAlignment: Text.AlignHCenter
@@ -187,7 +193,7 @@ Panel {
 
           Column {
             width: parent.width
-            spacing: Style.space(6)
+            spacing: Style.space(4)
             visible: docker.errorKind === "" && docker.containers.length > 0
 
             Repeater {
@@ -213,7 +219,9 @@ Panel {
 
           ActionIcon {
             kind: "back"
-            foreground: root.bar.foreground
+            size: Style.space(20)
+            foreground: root.secondaryText
+            hoverColor: Color.accent
             tooltipText: "Back"
             onClicked: {
               root.logsViewOpen = false
@@ -233,14 +241,18 @@ Panel {
 
           ActionIcon {
             kind: "refresh"
-            foreground: root.bar.foreground
+            size: Style.space(20)
+            foreground: root.secondaryText
+            hoverColor: Color.accent
             tooltipText: "Refresh"
             onClicked: docker.fetchLogs(docker.logsContainerId)
           }
 
           ActionIcon {
             kind: "open"
-            foreground: root.bar.foreground
+            size: Style.space(20)
+            foreground: root.secondaryText
+            hoverColor: Color.accent
             tooltipText: "Open in lazydocker"
             onClicked: Quickshell.execDetached(["omarchy-launch-docker-tui"])
           }
@@ -290,27 +302,32 @@ Panel {
     property var container: null
     readonly property string colorKey: Model.statusColorFor(container)
     readonly property color stateColor: colorKey === "running" ? Color.accent : (colorKey === "unhealthy" ? Color.urgent : Color.muted)
+    readonly property bool hovered: hoverTracker.hovered
 
-    color: "transparent"
+    color: hovered ? root.rowHoverFill : "transparent"
     radius: Style.cornerRadius
-    implicitHeight: rowContent.implicitHeight + Style.space(12)
+    implicitHeight: rowContent.implicitHeight + Style.space(10)
+
+    Behavior on color { ColorAnimation { duration: 80 } }
+
+    HoverHandler { id: hoverTracker }
 
     ColumnLayout {
       id: rowContent
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(8)
+      anchors.leftMargin: Style.space(10)
       anchors.rightMargin: Style.space(8)
-      spacing: Style.space(2)
+      spacing: Style.space(3)
 
       RowLayout {
         Layout.fillWidth: true
         spacing: Style.space(6)
 
         Rectangle {
-          width: Style.space(8)
-          height: Style.space(8)
+          width: Style.space(7)
+          height: Style.space(7)
           radius: width / 2
           color: row.stateColor
         }
@@ -325,12 +342,71 @@ Panel {
           elide: Text.ElideRight
           Layout.fillWidth: true
         }
+
+        RowLayout {
+          spacing: Style.space(1)
+          Layout.alignment: Qt.AlignVCenter
+
+          ActionIcon {
+            visible: row.container.isRunning
+            size: Style.space(18)
+            kind: "stop"
+            opacity: row.hovered ? 1.0 : 0.45
+            foreground: row.hovered ? root.bar.foreground : root.quietAction
+            hoverColor: Color.accent
+            tooltipText: "Stop"
+            onClicked: docker.stopContainer(row.container.id)
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+          }
+
+          ActionIcon {
+            visible: !row.container.isRunning
+            size: Style.space(18)
+            kind: "start"
+            opacity: row.hovered ? 1.0 : 0.45
+            foreground: row.hovered ? root.bar.foreground : root.quietAction
+            hoverColor: Color.accent
+            tooltipText: "Start"
+            onClicked: docker.startContainer(row.container.id)
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+          }
+
+          ActionIcon {
+            size: Style.space(18)
+            kind: "logs"
+            opacity: row.hovered ? 1.0 : 0.45
+            foreground: row.hovered ? root.bar.foreground : root.quietAction
+            hoverColor: Color.accent
+            tooltipText: "View logs"
+            onClicked: {
+              root.logsViewOpen = true
+              docker.fetchLogs(row.container.id)
+            }
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+          }
+
+          ActionIcon {
+            size: Style.space(18)
+            kind: "remove"
+            opacity: row.hovered ? 1.0 : 0.45
+            foreground: row.hovered ? root.bar.foreground : root.quietAction
+            hoverColor: root.bar.urgent
+            tooltipText: "Remove"
+            onClicked: {
+              root.pendingRemoveId = row.container.id
+              root.pendingRemoveName = row.container.name
+              removeConfirm.selectedIndex = 1
+              root.confirmRemoveOpen = true
+            }
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+          }
+        }
       }
 
       Text {
         textFormat: Text.PlainText
         text: row.container.image + " · " + row.container.statusText
-        color: Qt.darker(root.bar.foreground, 1.4)
+        color: root.secondaryText
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
@@ -345,7 +421,8 @@ Panel {
         textFormat: Text.PlainText
         visible: row.container.ports.length > 0
         text: Model.formatPortsDisplay(row.container.ports)
-        color: hasHostPort ? Color.accent : Qt.darker(root.bar.foreground, 1.4)
+        color: hasHostPort ? Color.accent : root.mutedText
+        opacity: hasHostPort ? 0.9 : 1.0
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
         font.underline: hasHostPort && portsMouse.containsMouse
@@ -360,53 +437,6 @@ Panel {
           cursorShape: portsText.hasHostPort ? Qt.PointingHandCursor : Qt.ArrowCursor
           onClicked: Qt.openUrlExternally("http://localhost:" + portsText.hostPorts[0].hostPort)
         }
-      }
-
-      RowLayout {
-        Layout.fillWidth: true
-        Layout.topMargin: Style.space(4)
-        spacing: Style.space(4)
-
-        ActionIcon {
-          visible: row.container.isRunning
-          kind: "stop"
-          foreground: root.bar.foreground
-          tooltipText: "Stop"
-          onClicked: docker.stopContainer(row.container.id)
-        }
-
-        ActionIcon {
-          visible: !row.container.isRunning
-          kind: "start"
-          foreground: root.bar.foreground
-          tooltipText: "Start"
-          onClicked: docker.startContainer(row.container.id)
-        }
-
-        ActionIcon {
-          kind: "remove"
-          foreground: root.bar.foreground
-          hoverColor: root.bar.urgent
-          tooltipText: "Remove"
-          onClicked: {
-            root.pendingRemoveId = row.container.id
-            root.pendingRemoveName = row.container.name
-            removeConfirm.selectedIndex = 1
-            root.confirmRemoveOpen = true
-          }
-        }
-
-        ActionIcon {
-          kind: "logs"
-          foreground: root.bar.foreground
-          tooltipText: "View logs"
-          onClicked: {
-            root.logsViewOpen = true
-            docker.fetchLogs(row.container.id)
-          }
-        }
-
-        Item { Layout.fillWidth: true }
       }
     }
   }
