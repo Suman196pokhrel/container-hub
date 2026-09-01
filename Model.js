@@ -53,10 +53,35 @@ function parseContainerLine(line) {
   }
 }
 
+function sortContainers(containers) {
+  var list = (containers || []).slice()
+  list.sort(function(a, b) {
+    if (a.isRunning !== b.isRunning) return a.isRunning ? -1 : 1
+    var an = String(a.name || "").toLowerCase()
+    var bn = String(b.name || "").toLowerCase()
+    if (an < bn) return -1
+    if (an > bn) return 1
+    return 0
+  })
+  return list
+}
+
+function parseContainerList(rawStdout) {
+  var lines = String(rawStdout || "").split("\n")
+  var containers = []
+  for (var i = 0; i < lines.length; i++) {
+    var parsed = parseContainerLine(lines[i])
+    if (parsed) containers.push(parsed)
+  }
+  return sortContainers(containers)
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parsePorts: parsePorts,
     formatPortsDisplay: formatPortsDisplay,
-    parseContainerLine: parseContainerLine
+    parseContainerLine: parseContainerLine,
+    sortContainers: sortContainers,
+    parseContainerList: parseContainerList
   }
 }

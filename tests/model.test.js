@@ -60,3 +60,26 @@ test('parseContainerLine returns null for blank or invalid input', () => {
   assert.equal(Model.parseContainerLine(''), null)
   assert.equal(Model.parseContainerLine('not json'), null)
 })
+
+test('sortContainers puts running first, then sorts by name', () => {
+  const containers = [
+    { name: 'zeta', isRunning: false },
+    { name: 'alpha', isRunning: true },
+    { name: 'beta', isRunning: true }
+  ]
+  const sorted = Model.sortContainers(containers)
+  assert.deepEqual(sorted.map(c => c.name), ['alpha', 'beta', 'zeta'])
+})
+
+test('parseContainerList parses multiple lines and sorts them', () => {
+  const running = JSON.stringify({ ID: '1', Image: 'x', Names: 'zzz-running', State: 'running', Status: 'Up', HealthStatus: 'none', Ports: '', CreatedAt: '' })
+  const stopped = JSON.stringify({ ID: '2', Image: 'x', Names: 'aaa-stopped', State: 'exited', Status: 'Exited', HealthStatus: 'none', Ports: '', CreatedAt: '' })
+  const list = Model.parseContainerList(running + '\n' + stopped + '\n')
+  assert.equal(list.length, 2)
+  assert.equal(list[0].name, 'zzz-running')
+  assert.equal(list[1].name, 'aaa-stopped')
+})
+
+test('parseContainerList skips blank lines', () => {
+  assert.deepEqual(Model.parseContainerList('\n\n'), [])
+})
