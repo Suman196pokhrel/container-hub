@@ -15,6 +15,10 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  property string pendingRemoveId: ""
+  property string pendingRemoveName: ""
+  property bool confirmRemoveOpen: false
+
   onOpenedChanged: {
     docker.panelOpen = root.opened
     if (root.opened) docker.refresh()
@@ -178,6 +182,21 @@ Panel {
     }
   }
 
+  ConfirmDialog {
+    anchors.fill: panel
+    opened: root.confirmRemoveOpen
+    z: 20
+    message: "Remove container \"" + root.pendingRemoveName + "\"?"
+    confirmText: "Remove"
+    background: Color.background
+    foreground: root.bar.foreground
+    onCanceled: root.confirmRemoveOpen = false
+    onConfirmed: {
+      docker.removeContainer(root.pendingRemoveId)
+      root.confirmRemoveOpen = false
+    }
+  }
+
   component ContainerRow: Rectangle {
     id: row
     property var container: null
@@ -239,6 +258,42 @@ Panel {
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
         Layout.fillWidth: true
+      }
+
+      RowLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        spacing: Style.space(4)
+
+        ActionIcon {
+          visible: row.container.isRunning
+          kind: "stop"
+          foreground: root.bar.foreground
+          tooltipText: "Stop"
+          onClicked: docker.stopContainer(row.container.id)
+        }
+
+        ActionIcon {
+          visible: !row.container.isRunning
+          kind: "start"
+          foreground: root.bar.foreground
+          tooltipText: "Start"
+          onClicked: docker.startContainer(row.container.id)
+        }
+
+        ActionIcon {
+          kind: "remove"
+          foreground: root.bar.foreground
+          hoverColor: root.bar.urgent
+          tooltipText: "Remove"
+          onClicked: {
+            root.pendingRemoveId = row.container.id
+            root.pendingRemoveName = row.container.name
+            root.confirmRemoveOpen = true
+          }
+        }
+
+        Item { Layout.fillWidth: true }
       }
     }
   }
