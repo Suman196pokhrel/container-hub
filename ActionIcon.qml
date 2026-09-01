@@ -11,7 +11,7 @@ Item {
   property color foreground: Color.foreground
   property color hoverColor: foreground
   property real size: Style.space(22)
-  property bool enabled: true
+  enabled: true
 
   signal clicked()
 
@@ -29,13 +29,13 @@ Item {
   }
 
   Shape {
+    visible: root.kind === "stop"
     anchors.centerIn: parent
     width: root._s
     height: root._s
     antialiasing: true
 
     ShapePath {
-      visible: root.kind === "stop"
       fillColor: root._iconColor
       strokeWidth: 0
       startX: 0; startY: 0
@@ -44,9 +44,16 @@ Item {
       PathLine { x: 0; y: root._s }
       PathLine { x: 0; y: 0 }
     }
+  }
+
+  Shape {
+    visible: root.kind === "start"
+    anchors.centerIn: parent
+    width: root._s
+    height: root._s
+    antialiasing: true
 
     ShapePath {
-      visible: root.kind === "start"
       fillColor: root._iconColor
       strokeWidth: 0
       startX: 0; startY: 0
@@ -54,9 +61,16 @@ Item {
       PathLine { x: 0; y: root._s }
       PathLine { x: 0; y: 0 }
     }
+  }
+
+  Shape {
+    visible: root.kind === "remove"
+    anchors.centerIn: parent
+    width: root._s
+    height: root._s
+    antialiasing: true
 
     ShapePath {
-      visible: root.kind === "remove"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.18)
       fillColor: "transparent"
@@ -65,7 +79,6 @@ Item {
       PathLine { x: root._s; y: root._s }
     }
     ShapePath {
-      visible: root.kind === "remove"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.18)
       fillColor: "transparent"
@@ -73,9 +86,16 @@ Item {
       startX: root._s; startY: 0
       PathLine { x: 0; y: root._s }
     }
+  }
+
+  Shape {
+    visible: root.kind === "logs"
+    anchors.centerIn: parent
+    width: root._s
+    height: root._s
+    antialiasing: true
 
     ShapePath {
-      visible: root.kind === "logs"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.16)
       fillColor: "transparent"
@@ -83,7 +103,6 @@ Item {
       PathLine { x: root._s; y: root._s * 0.15 }
     }
     ShapePath {
-      visible: root.kind === "logs"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.16)
       fillColor: "transparent"
@@ -91,16 +110,22 @@ Item {
       PathLine { x: root._s; y: root._s * 0.5 }
     }
     ShapePath {
-      visible: root.kind === "logs"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.16)
       fillColor: "transparent"
       startX: 0; startY: root._s * 0.85
       PathLine { x: root._s; y: root._s * 0.85 }
     }
+  }
+
+  Shape {
+    visible: root.kind === "back"
+    anchors.centerIn: parent
+    width: root._s
+    height: root._s
+    antialiasing: true
 
     ShapePath {
-      visible: root.kind === "back"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.16)
       fillColor: "transparent"
@@ -110,9 +135,16 @@ Item {
       PathLine { x: root._s * 0.12; y: root._s * 0.5 }
       PathLine { x: root._s * 0.68; y: root._s }
     }
+  }
+
+  Shape {
+    visible: root.kind === "open"
+    anchors.centerIn: parent
+    width: root._s
+    height: root._s
+    antialiasing: true
 
     ShapePath {
-      visible: root.kind === "open"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.16)
       fillColor: "transparent"
@@ -121,7 +153,6 @@ Item {
       PathLine { x: root._s * 0.9; y: root._s * 0.1 }
     }
     ShapePath {
-      visible: root.kind === "open"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.16)
       fillColor: "transparent"
@@ -131,13 +162,22 @@ Item {
       PathLine { x: root._s * 0.9; y: root._s * 0.1 }
       PathLine { x: root._s * 0.9; y: root._s * 0.55 }
     }
+  }
+
+  Shape {
+    visible: root.kind === "refresh"
+    anchors.centerIn: parent
+    width: root._s
+    height: root._s
+    antialiasing: true
 
     ShapePath {
-      visible: root.kind === "refresh"
       strokeColor: root._iconColor
       strokeWidth: Math.max(1, root._s * 0.16)
       fillColor: "transparent"
       capStyle: ShapePath.RoundCap
+      startX: root._s / 2 + (root._s / 2) * Math.cos(-20 * Math.PI / 180)
+      startY: root._s / 2 + (root._s / 2) * Math.sin(-20 * Math.PI / 180)
       PathAngleArc {
         centerX: root._s / 2; centerY: root._s / 2
         radiusX: root._s / 2; radiusY: root._s / 2
@@ -145,7 +185,6 @@ Item {
       }
     }
     ShapePath {
-      visible: root.kind === "refresh"
       fillColor: root._iconColor
       strokeWidth: 0
       startX: root._s; startY: root._s * 0.06
