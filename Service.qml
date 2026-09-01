@@ -18,6 +18,12 @@ Item {
   readonly property int refreshIntervalOpenSec: intSetting("refreshIntervalOpenSec", 3, 1, 60)
   readonly property int refreshIntervalClosedSec: intSetting("refreshIntervalClosedSec", 15, 5, 300)
 
+  readonly property int logTailLines: intSetting("logTailLines", 200, 50, 1000)
+
+  property string logsText: ""
+  property string logsContainerId: ""
+  property bool logsLoading: false
+
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
     return value === undefined || value === null ? fallback : value
@@ -55,6 +61,20 @@ Item {
     var classified = Model.classifyDockerError(root.dockerAvailable, stderrText)
     root.errorKind = classified.kind
     root.errorMessage = classified.message
+  }
+
+  function fetchLogs(id) {
+    if (logsProcess.running) return
+    root.logsLoading = true
+    root.logsContainerId = id
+    root.logsText = ""
+    logsProcess.command = ["docker", "logs", "--tail", String(root.logTailLines), "--timestamps", id]
+    logsProcess.running = true
+  }
+
+  function clearLogs() {
+    root.logsContainerId = ""
+    root.logsText = ""
   }
 
   onPanelOpenChanged: refreshTimer.restart()
@@ -129,6 +149,20 @@ Item {
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: root.refresh()
+  }
+
+  Process {
+    id: logsProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: logsStdout; waitForEnd: true }
+    stderr: StdioCollector { id: logsStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.logsLoading = false
+      root.logsText = exitCode === 0
+        ? (logsStdout.text || "(no output)")
+        : "Could not read logs: " + (logsStderr.text || logsStdout.text || "unknown error")
+    }
   }
 
   Component.onCompleted: whichProcess.running = true
