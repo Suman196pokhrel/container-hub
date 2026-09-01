@@ -1,10 +1,18 @@
 # Container Hub
 
-An Omarchy bar plugin for monitoring and managing local Docker containers —
-built for fullstack developers juggling several projects who don't want to
-drop to a terminal just to check what's running.
+The best Omarchy plugin for container monitoring: a clean bar panel for
+watching and managing local containers without dropping to a terminal.
 
-Status: work in progress (MVP).
+Container Hub is actively in development. The Docker MVP is done: listing,
+status, ports, logs, start, stop, and remove are all working. Next up is
+Podman support, followed by final polish, performance work, and reliability
+optimizations.
+
+## Preview
+
+![Container Hub on the Omarchy desktop](docs/assets/container-hub-desktop.png)
+
+![Container Hub popup](docs/assets/container-hub-popup.png)
 
 ## Features
 
@@ -15,7 +23,7 @@ Status: work in progress (MVP).
 - Click a published port to open it in the browser
 - Bar badge shows the running container count
 
-Docker only for now — no Podman.
+Docker is supported now. Podman support is planned next.
 
 ## Install
 
@@ -23,7 +31,7 @@ This plugin lives directly under `~/.config/omarchy/plugins/container-hub/`.
 
 ```bash
 git clone git@github.com:Suman196pokhrel/container-hub.git ~/.config/omarchy/plugins/container-hub
-omarchy bar move io.github.suman196pokhrel.container-hub --section right
+omarchy bar put io.github.suman196pokhrel.container-hub --section right
 ```
 
 Requires the `docker` CLI on `PATH` and your user in the `docker` group
