@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -19,11 +20,24 @@ Panel {
   property string pendingRemoveName: ""
   property bool confirmRemoveOpen: false
   property bool logsViewOpen: false
+  property string logsContainerName: ""
 
   readonly property color secondaryText: Qt.darker(root.bar.foreground, 1.4)
   readonly property color mutedText: Qt.darker(root.bar.foreground, 1.7)
   readonly property color quietAction: Qt.darker(root.bar.foreground, 1.65)
-  readonly property color rowHoverFill: Util.alpha(root.bar.foreground, 0.055)
+  readonly property color panelFill: Style.normalFillFor(root.bar.foreground, Color.accent)
+  readonly property color panelHoverFill: Style.hoverFillFor(root.bar.foreground, Color.accent)
+  readonly property var runningContainers: docker.containers.filter(function(c) { return c && c.isRunning })
+  readonly property var inactiveContainers: docker.containers.filter(function(c) { return c && !c.isRunning })
+  readonly property int inactiveCount: Math.max(0, docker.containers.length - docker.runningCount)
+  readonly property int unhealthyCount: {
+    var count = 0
+    for (var i = 0; i < docker.containers.length; i++) {
+      var container = docker.containers[i]
+      if (container && container.isRunning && container.healthStatus === "unhealthy") count++
+    }
+    return count
+  }
 
   onOpenedChanged: {
     docker.panelOpen = root.opened
@@ -31,6 +45,7 @@ Panel {
     else {
       root.confirmRemoveOpen = false
       root.logsViewOpen = false
+      root.logsContainerName = ""
       docker.clearLogs()
     }
   }
@@ -49,7 +64,7 @@ Panel {
     hasVisualContent: true
     fixedWidth: vertical ? -1 : Math.max(Style.bar.iconSlot, Style.bar.iconCanvas + Style.space(22))
 
-    readonly property color badgeColor: docker.errorKind !== "" ? Color.urgent : Color.muted
+    readonly property color badgeColor: docker.errorKind !== "" ? Color.urgent : (docker.runningCount > 0 ? Color.accent : root.secondaryText)
 
     RowLayout {
       anchors.centerIn: parent
@@ -68,9 +83,10 @@ Panel {
         textFormat: Text.PlainText
         text: String(docker.runningCount)
         color: button.badgeColor
-        opacity: docker.errorKind !== "" ? 1.0 : 0.78
+        opacity: 1.0
         font.family: Style.font.family
-        font.pixelSize: Math.max(8, Style.font.caption * 0.76)
+        font.pixelSize: Math.max(9, Style.font.caption * 0.9)
+        font.bold: true
       }
     }
 
@@ -87,7 +103,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(360))
+    contentWidth: panel.fittedContentWidth(Style.space(380))
     contentHeight: panel.fittedContentHeight(root.logsViewOpen ? Style.space(480) : column.implicitHeight, Style.space(480))
 
     PanelKeyCatcher {
@@ -123,43 +139,79 @@ Panel {
         Column {
           id: column
           width: panelFlick.width
-          spacing: Style.space(10)
+          spacing: Style.space(12)
 
           Item {
             width: parent.width
-            implicitHeight: headerRow.implicitHeight
+            implicitHeight: Math.max(headerIcon.implicitHeight, headerLabels.implicitHeight, headerActions.implicitHeight)
 
-            RowLayout {
-              id: headerRow
+            ContainerIcon {
+              id: headerIcon
+              iconSize: Style.font.display * 0.9
+              color: root.bar.foreground
               anchors.left: parent.left
-              anchors.right: parent.right
-              spacing: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Column {
+              id: headerLabels
+              anchors.left: headerIcon.right
+              anchors.leftMargin: Style.space(12)
+              anchors.right: headerActions.left
+              anchors.rightMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
 
               Text {
+                width: parent.width
                 textFormat: Text.PlainText
                 text: "Container Hub"
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.title
                 font.bold: true
-                Layout.fillWidth: true
+                elide: Text.ElideRight
               }
 
               Text {
+                width: parent.width
                 textFormat: Text.PlainText
-                visible: docker.errorKind === ""
-                text: docker.runningCount + " running · " + docker.containers.length + " total"
+                text: docker.errorKind !== "" ? "DOCKER STATUS" : (docker.loading ? "REFRESHING CONTAINERS" : docker.runningCount + " RUNNING · " + docker.containers.length + " TOTAL")
                 color: root.secondaryText
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
+                font.bold: true
+                elide: Text.ElideRight
+              }
+            }
+
+            RowLayout {
+              id: headerActions
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
+
+              PanelActionButton {
+                iconText: "󰒓"
+                tooltipText: "Open lazydocker"
+                foreground: root.secondaryText
+                hoverColor: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                fontSize: Style.font.subtitle
+                size: Style.space(24)
+                bordered: true
+                onClicked: Quickshell.execDetached(["omarchy-launch-docker-tui"])
               }
 
-              ActionIcon {
-                kind: "refresh"
-                size: Style.space(20)
+              PanelActionButton {
+                iconText: "󰑐"
+                tooltipText: "Refresh"
                 foreground: root.secondaryText
                 hoverColor: Color.accent
-                tooltipText: "Refresh"
+                fontFamily: root.bar.fontFamily
+                fontSize: Style.font.subtitle
+                size: Style.space(24)
+                bordered: true
                 onClicked: docker.refresh()
               }
             }
@@ -167,6 +219,41 @@ Panel {
 
           PanelSeparator {
             foreground: root.bar.foreground
+          }
+
+          GridLayout {
+            visible: docker.errorKind === ""
+            width: parent.width
+            columns: 4
+            columnSpacing: Style.space(6)
+            rowSpacing: Style.space(6)
+
+            StatTile {
+              label: "RUNNING"
+              value: String(docker.runningCount)
+              valueColor: docker.runningCount > 0 ? Color.accent : root.bar.foreground
+              Layout.fillWidth: true
+            }
+
+            StatTile {
+              label: "TOTAL"
+              value: String(docker.containers.length)
+              Layout.fillWidth: true
+            }
+
+            StatTile {
+              label: "STOPPED"
+              value: String(root.inactiveCount)
+              valueColor: root.inactiveCount > 0 ? root.bar.foreground : root.secondaryText
+              Layout.fillWidth: true
+            }
+
+            StatTile {
+              label: "UNHEALTHY"
+              value: String(root.unhealthyCount)
+              valueColor: root.unhealthyCount > 0 ? root.bar.urgent : root.secondaryText
+              Layout.fillWidth: true
+            }
           }
 
           Text {
@@ -193,16 +280,25 @@ Panel {
 
           Column {
             width: parent.width
-            spacing: Style.space(4)
+            spacing: Style.space(12)
             visible: docker.errorKind === "" && docker.containers.length > 0
 
-            Repeater {
-              model: docker.containers
-              ContainerRow {
-                required property var modelData
-                width: column.width
-                container: modelData
-              }
+            ContainerSection {
+              title: "RUNNING CONTAINERS"
+              emptyText: "No running containers."
+              containers: root.runningContainers
+              showEmpty: true
+            }
+
+            PanelSeparator {
+              visible: root.inactiveContainers.length > 0
+              foreground: root.bar.foreground
+            }
+
+            ContainerSection {
+              visible: root.inactiveContainers.length > 0
+              title: "STOPPED CONTAINERS"
+              containers: root.inactiveContainers
             }
           }
         }
@@ -217,21 +313,25 @@ Panel {
           width: parent.width
           spacing: Style.space(8)
 
-          ActionIcon {
-            kind: "back"
-            size: Style.space(20)
+          PanelActionButton {
+            iconText: ""
+            size: Style.space(24)
             foreground: root.secondaryText
-            hoverColor: Color.accent
+            hoverColor: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.subtitle
+            bordered: true
             tooltipText: "Back"
             onClicked: {
               root.logsViewOpen = false
+              root.logsContainerName = ""
               docker.clearLogs()
             }
           }
 
           Text {
             textFormat: Text.PlainText
-            text: "Logs"
+            text: root.logsContainerName !== "" ? root.logsContainerName : "Logs"
             color: root.bar.foreground
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.title
@@ -239,42 +339,64 @@ Panel {
             Layout.fillWidth: true
           }
 
-          ActionIcon {
-            kind: "refresh"
-            size: Style.space(20)
+          PanelActionButton {
+            iconText: "󰑐"
+            size: Style.space(24)
             foreground: root.secondaryText
             hoverColor: Color.accent
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.subtitle
+            bordered: true
             tooltipText: "Refresh"
             onClicked: docker.fetchLogs(docker.logsContainerId)
           }
 
-          ActionIcon {
-            kind: "open"
-            size: Style.space(20)
+          PanelActionButton {
+            iconText: "󰒓"
+            size: Style.space(24)
             foreground: root.secondaryText
-            hoverColor: Color.accent
+            hoverColor: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.subtitle
+            bordered: true
             tooltipText: "Open in lazydocker"
             onClicked: Quickshell.execDetached(["omarchy-launch-docker-tui"])
           }
         }
 
+        PanelSeparator {
+          foreground: root.bar.foreground
+        }
+
         Flickable {
           width: parent.width
-          height: parent.height - Style.space(40)
+          height: parent.height - Style.space(48)
           contentWidth: width
-          contentHeight: logsTextItem.implicitHeight
+          contentHeight: logsBox.implicitHeight
           clip: true
           boundsBehavior: Flickable.StopAtBounds
 
-          Text {
-            id: logsTextItem
-            textFormat: Text.PlainText
+          BorderSurface {
+            id: logsBox
             width: parent.width
-            text: docker.logsLoading ? "Loading…" : docker.logsText
-            color: root.bar.foreground
-            font.family: "monospace"
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WrapAnywhere
+            implicitHeight: logsTextItem.implicitHeight + Style.space(18)
+            color: root.panelFill
+            borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
+            radius: Style.cornerRadius
+
+            Text {
+              id: logsTextItem
+              textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.margins: Style.space(9)
+              text: docker.logsLoading ? "Loading..." : docker.logsText
+              color: root.bar.foreground
+              font.family: "monospace"
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WrapAnywhere
+            }
           }
         }
       }
@@ -297,16 +419,115 @@ Panel {
     }
   }
 
-  component ContainerRow: Rectangle {
+  component StatTile: BorderSurface {
+    id: stat
+    property string label: ""
+    property string value: ""
+    property color valueColor: root.bar.foreground
+
+    implicitHeight: Style.space(46)
+    color: root.panelFill
+    borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
+    radius: Style.cornerRadius
+
+    Column {
+      anchors.centerIn: parent
+      spacing: Style.space(2)
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.horizontalCenter: parent.horizontalCenter
+        text: stat.label
+        color: root.secondaryText
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.horizontalCenter: parent.horizontalCenter
+        text: stat.value
+        color: stat.valueColor
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.title
+        font.bold: true
+      }
+    }
+  }
+
+  component ContainerSection: Column {
+    id: section
+    property string title: ""
+    property string emptyText: ""
+    property var containers: []
+    property bool showEmpty: false
+
+    width: parent ? parent.width : implicitWidth
+    spacing: Style.space(6)
+
+    PanelSectionHeader {
+      text: section.title
+      foreground: root.bar.foreground
+      fontFamily: root.bar.fontFamily
+    }
+
+    BorderSurface {
+      visible: section.containers.length === 0 && section.showEmpty
+      width: section.width
+      implicitHeight: Style.space(38)
+      color: root.panelFill
+      borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
+      radius: Style.cornerRadius
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.centerIn: parent
+        text: section.emptyText
+        color: root.secondaryText
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+    }
+
+    Repeater {
+      model: section.containers
+
+      ContainerRow {
+        required property var modelData
+        width: section.width
+        container: modelData
+      }
+    }
+  }
+
+  component ContainerRow: BorderSurface {
     id: row
     property var container: null
     readonly property string colorKey: Model.statusColorFor(container)
     readonly property color stateColor: colorKey === "running" ? Color.accent : (colorKey === "unhealthy" ? Color.urgent : Color.muted)
+    readonly property string stateLabel: {
+      if (!container) return ""
+      if (container.isRunning && container.healthStatus === "unhealthy") return "Unhealthy"
+      if (container.isRunning) return "Running"
+      if (container.state === "created") return "Created"
+      if (container.state === "exited") return "Exited"
+      return container.state
+    }
+    readonly property string statusDetail: {
+      if (!container) return ""
+      var text = String(container.statusText || "")
+      var state = String(row.stateLabel || "")
+      if (state !== "" && text.toLowerCase().indexOf(state.toLowerCase()) === 0)
+        return text.substring(state.length).replace(/^\s+/, "")
+      return text
+    }
     readonly property bool hovered: hoverTracker.hovered
 
-    color: hovered ? root.rowHoverFill : "transparent"
+    color: hovered ? root.panelHoverFill : root.panelFill
+    borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
     radius: Style.cornerRadius
-    implicitHeight: rowContent.implicitHeight + Style.space(10)
+    implicitHeight: rowContent.implicitHeight + Style.space(14)
 
     Behavior on color { ColorAnimation { duration: 80 } }
 
@@ -319,7 +540,7 @@ Panel {
       anchors.verticalCenter: parent.verticalCenter
       anchors.leftMargin: Style.space(10)
       anchors.rightMargin: Style.space(8)
-      spacing: Style.space(3)
+      spacing: Style.space(7)
 
       RowLayout {
         Layout.fillWidth: true
@@ -332,65 +553,92 @@ Panel {
           color: row.stateColor
         }
 
-        Text {
-          textFormat: Text.PlainText
-          text: row.container.name
-          color: root.bar.foreground
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
-          elide: Text.ElideRight
+        ColumnLayout {
           Layout.fillWidth: true
+          spacing: Style.space(1)
+
+          Text {
+            textFormat: Text.PlainText
+            text: row.container.name
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+            elide: Text.ElideRight
+            Layout.fillWidth: true
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            text: row.container.image
+            color: root.secondaryText
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+            Layout.fillWidth: true
+          }
         }
 
         RowLayout {
-          spacing: Style.space(1)
+          spacing: Style.space(4)
           Layout.alignment: Qt.AlignVCenter
 
-          ActionIcon {
+          Button {
             visible: row.container.isRunning
-            size: Style.space(18)
-            kind: "stop"
-            opacity: row.hovered ? 1.0 : 0.45
-            foreground: row.hovered ? root.bar.foreground : root.quietAction
-            hoverColor: Color.accent
+            iconText: ""
+            text: "Stop"
             tooltipText: "Stop"
+            foreground: root.bar.foreground
+            accent: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.caption
+            iconSize: Style.font.caption
+            horizontalPadding: Style.space(7)
+            verticalPadding: Style.space(4)
+            bordered: true
             onClicked: docker.stopContainer(row.container.id)
-            Behavior on opacity { NumberAnimation { duration: 100 } }
           }
 
-          ActionIcon {
+          Button {
             visible: !row.container.isRunning
-            size: Style.space(18)
-            kind: "start"
-            opacity: row.hovered ? 1.0 : 0.45
-            foreground: row.hovered ? root.bar.foreground : root.quietAction
-            hoverColor: Color.accent
+            iconText: ""
+            text: "Start"
             tooltipText: "Start"
+            foreground: Color.accent
+            accent: Color.accent
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.caption
+            iconSize: Style.font.caption
+            horizontalPadding: Style.space(7)
+            verticalPadding: Style.space(4)
+            bordered: true
             onClicked: docker.startContainer(row.container.id)
-            Behavior on opacity { NumberAnimation { duration: 100 } }
           }
 
-          ActionIcon {
-            size: Style.space(18)
-            kind: "logs"
-            opacity: row.hovered ? 1.0 : 0.45
-            foreground: row.hovered ? root.bar.foreground : root.quietAction
-            hoverColor: Color.accent
+          PanelActionButton {
+            iconText: "󰈙"
+            size: Style.space(24)
+            foreground: root.secondaryText
+            hoverColor: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.subtitle
+            bordered: true
             tooltipText: "View logs"
             onClicked: {
+              root.logsContainerName = row.container.name
               root.logsViewOpen = true
               docker.fetchLogs(row.container.id)
             }
-            Behavior on opacity { NumberAnimation { duration: 100 } }
           }
 
-          ActionIcon {
-            size: Style.space(18)
-            kind: "remove"
-            opacity: row.hovered ? 1.0 : 0.45
-            foreground: row.hovered ? root.bar.foreground : root.quietAction
+          PanelActionButton {
+            iconText: "󰆴"
+            size: Style.space(24)
+            foreground: root.secondaryText
             hoverColor: root.bar.urgent
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.subtitle
+            bordered: true
             tooltipText: "Remove"
             onClicked: {
               root.pendingRemoveId = row.container.id
@@ -398,46 +646,80 @@ Panel {
               removeConfirm.selectedIndex = 1
               root.confirmRemoveOpen = true
             }
-            Behavior on opacity { NumberAnimation { duration: 100 } }
           }
         }
       }
 
-      Text {
-        textFormat: Text.PlainText
-        text: row.container.image + " · " + row.container.statusText
-        color: root.secondaryText
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
+      RowLayout {
         Layout.fillWidth: true
-      }
+        spacing: Style.space(6)
 
-      Text {
-        id: portsText
-        readonly property var hostPorts: row.container.ports.filter(function(p) { return p.hostPort !== null })
-        readonly property bool hasHostPort: hostPorts.length > 0
+        StatusPill {
+          label: row.stateLabel
+          tone: row.stateColor
+        }
 
-        textFormat: Text.PlainText
-        visible: row.container.ports.length > 0
-        text: Model.formatPortsDisplay(row.container.ports)
-        color: hasHostPort ? Color.accent : root.mutedText
-        opacity: hasHostPort ? 0.9 : 1.0
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        font.underline: hasHostPort && portsMouse.containsMouse
-        elide: Text.ElideRight
-        Layout.fillWidth: true
+        Text {
+          textFormat: Text.PlainText
+          visible: row.statusDetail !== ""
+          text: row.statusDetail
+          color: root.secondaryText
+          font.family: root.bar.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+          Layout.fillWidth: true
+        }
 
-        MouseArea {
-          id: portsMouse
-          anchors.fill: parent
-          enabled: portsText.hasHostPort
-          hoverEnabled: true
-          cursorShape: portsText.hasHostPort ? Qt.PointingHandCursor : Qt.ArrowCursor
-          onClicked: Qt.openUrlExternally("http://localhost:" + portsText.hostPorts[0].hostPort)
+        PortPill {
+          ports: row.container.ports
         }
       }
+    }
+  }
+
+  component StatusPill: BorderSurface {
+    id: pill
+    property string label: ""
+    property color tone: root.bar.foreground
+
+    visible: label !== ""
+    implicitWidth: pillText.implicitWidth + Style.space(12)
+    implicitHeight: Style.space(20)
+    color: Util.alpha(tone, 0.10)
+    borderSpec: Border.flat(Util.alpha(tone, 0.45), Style.normalBorderWidth)
+    radius: Style.cornerRadius
+
+    Text {
+      id: pillText
+      textFormat: Text.PlainText
+      anchors.centerIn: parent
+      text: pill.label
+      color: pill.tone
+      font.family: root.bar.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+  }
+
+  component PortPill: Button {
+    id: portsButton
+    property var ports: []
+    readonly property var hostPorts: ports.filter(function(p) { return p.hostPort !== null })
+    readonly property bool hasHostPort: hostPorts.length > 0
+
+    visible: ports.length > 0
+    enabled: hasHostPort
+    text: Model.formatPortsDisplay(ports)
+    tooltipText: hasHostPort ? "Open localhost:" + hostPorts[0].hostPort : ""
+    foreground: hasHostPort ? Color.accent : root.secondaryText
+    accent: hasHostPort ? Color.accent : root.bar.foreground
+    fontFamily: root.bar.fontFamily
+    fontSize: Style.font.caption
+    horizontalPadding: Style.space(7)
+    verticalPadding: Style.space(3)
+    bordered: true
+    onClicked: {
+      if (hasHostPort) Qt.openUrlExternally("http://localhost:" + hostPorts[0].hostPort)
     }
   }
 }
