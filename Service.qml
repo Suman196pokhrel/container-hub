@@ -104,5 +104,32 @@ Item {
     }
   }
 
+  function stopContainer(id) {
+    runAction(["docker", "stop", id])
+  }
+
+  function startContainer(id) {
+    runAction(["docker", "start", id])
+  }
+
+  function removeContainer(id) {
+    runAction(["docker", "rm", "-f", id])
+  }
+
+  function runAction(command) {
+    if (actionProcess.running) return
+    actionProcess.command = command
+    actionProcess.running = true
+  }
+
+  Process {
+    id: actionProcess
+    running: false
+    command: []
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: root.refresh()
+  }
+
   Component.onCompleted: whichProcess.running = true
 }
