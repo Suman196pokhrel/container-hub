@@ -30,9 +30,33 @@ function formatPortsDisplay(ports) {
   }).join(", ")
 }
 
+function parseContainerLine(line) {
+  var text = String(line || "").trim()
+  if (!text) return null
+  var raw
+  try {
+    raw = JSON.parse(text)
+  } catch (e) {
+    return null
+  }
+  var state = String(raw.State || "").toLowerCase()
+  return {
+    id: String(raw.ID || ""),
+    name: String(raw.Names || ""),
+    image: String(raw.Image || ""),
+    state: state,
+    statusText: String(raw.Status || ""),
+    healthStatus: String(raw.HealthStatus || "none"),
+    isRunning: state === "running",
+    ports: parsePorts(raw.Ports),
+    createdAt: String(raw.CreatedAt || "")
+  }
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parsePorts: parsePorts,
-    formatPortsDisplay: formatPortsDisplay
+    formatPortsDisplay: formatPortsDisplay,
+    parseContainerLine: parseContainerLine
   }
 }
