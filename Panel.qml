@@ -18,10 +18,16 @@ Panel {
   property string pendingRemoveId: ""
   property string pendingRemoveName: ""
   property bool confirmRemoveOpen: false
+  property bool logsViewOpen: false
 
   onOpenedChanged: {
     docker.panelOpen = root.opened
     if (root.opened) docker.refresh()
+    else {
+      root.confirmRemoveOpen = false
+      root.logsViewOpen = false
+      docker.clearLogs()
+    }
   }
 
   Service {
@@ -78,17 +84,33 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(480))
+    contentHeight: panel.fittedContentHeight(root.logsViewOpen ? Style.space(480) : column.implicitHeight, Style.space(480))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onCloseRequested: {
+        if (root.confirmRemoveOpen) removeConfirm.canceled()
+        else root.close()
+      }
+      onTabRequested: function(direction) {
+        if (root.confirmRemoveOpen) removeConfirm.selectedIndex = removeConfirm.selectedIndex === 0 ? 1 : 0
+        else root.switchPanel(direction)
+      }
+      onMoveRequested: function(dx, dy) {
+        if (root.confirmRemoveOpen && dx !== 0) removeConfirm.selectedIndex = removeConfirm.selectedIndex === 0 ? 1 : 0
+      }
+      onReturnRequested: {
+        if (root.confirmRemoveOpen) {
+          if (removeConfirm.selectedIndex === 0) removeConfirm.canceled()
+          else removeConfirm.confirmed()
+        }
+      }
 
       Flickable {
         id: panelFlick
         anchors.fill: parent
+        visible: !root.logsViewOpen
         contentWidth: width
         contentHeight: column.implicitHeight
         clip: true
@@ -179,21 +201,87 @@ Panel {
           }
         }
       }
-    }
-  }
 
-  ConfirmDialog {
-    anchors.fill: panel
-    opened: root.confirmRemoveOpen
-    z: 20
-    message: "Remove container \"" + root.pendingRemoveName + "\"?"
-    confirmText: "Remove"
-    background: Color.background
-    foreground: root.bar.foreground
-    onCanceled: root.confirmRemoveOpen = false
-    onConfirmed: {
-      docker.removeContainer(root.pendingRemoveId)
-      root.confirmRemoveOpen = false
+      Column {
+        anchors.fill: parent
+        visible: root.logsViewOpen
+        spacing: Style.space(8)
+
+        RowLayout {
+          width: parent.width
+          spacing: Style.space(8)
+
+          ActionIcon {
+            kind: "back"
+            foreground: root.bar.foreground
+            tooltipText: "Back"
+            onClicked: {
+              root.logsViewOpen = false
+              docker.clearLogs()
+            }
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            text: "Logs"
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+            Layout.fillWidth: true
+          }
+
+          ActionIcon {
+            kind: "refresh"
+            foreground: root.bar.foreground
+            tooltipText: "Refresh"
+            onClicked: docker.fetchLogs(docker.logsContainerId)
+          }
+
+          ActionIcon {
+            kind: "open"
+            foreground: root.bar.foreground
+            tooltipText: "Open in lazydocker"
+            onClicked: Quickshell.execDetached(["omarchy-launch-docker-tui"])
+          }
+        }
+
+        Flickable {
+          width: parent.width
+          height: parent.height - Style.space(40)
+          contentWidth: width
+          contentHeight: logsTextItem.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+
+          Text {
+            id: logsTextItem
+            textFormat: Text.PlainText
+            width: parent.width
+            text: docker.logsLoading ? "Loading…" : docker.logsText
+            color: root.bar.foreground
+            font.family: "monospace"
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WrapAnywhere
+          }
+        }
+      }
+
+      ConfirmDialog {
+        id: removeConfirm
+        anchors.fill: parent
+        opened: root.confirmRemoveOpen
+        z: 20
+        message: "Remove container \"" + root.pendingRemoveName + "\"?"
+        confirmText: "Remove"
+        background: Color.background
+        foreground: root.bar.foreground
+        onCanceled: root.confirmRemoveOpen = false
+        onConfirmed: {
+          docker.removeContainer(root.pendingRemoveId)
+          root.confirmRemoveOpen = false
+        }
+      }
     }
   }
 
@@ -250,14 +338,28 @@ Panel {
       }
 
       Text {
+        id: portsText
+        readonly property var hostPorts: row.container.ports.filter(function(p) { return p.hostPort !== null })
+        readonly property bool hasHostPort: hostPorts.length > 0
+
         textFormat: Text.PlainText
         visible: row.container.ports.length > 0
         text: Model.formatPortsDisplay(row.container.ports)
-        color: Qt.darker(root.bar.foreground, 1.4)
+        color: hasHostPort ? Color.accent : Qt.darker(root.bar.foreground, 1.4)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
+        font.underline: hasHostPort && portsMouse.containsMouse
         elide: Text.ElideRight
         Layout.fillWidth: true
+
+        MouseArea {
+          id: portsMouse
+          anchors.fill: parent
+          enabled: portsText.hasHostPort
+          hoverEnabled: true
+          cursorShape: portsText.hasHostPort ? Qt.PointingHandCursor : Qt.ArrowCursor
+          onClicked: Qt.openUrlExternally("http://localhost:" + portsText.hostPorts[0].hostPort)
+        }
       }
 
       RowLayout {
@@ -289,7 +391,18 @@ Panel {
           onClicked: {
             root.pendingRemoveId = row.container.id
             root.pendingRemoveName = row.container.name
+            removeConfirm.selectedIndex = 1
             root.confirmRemoveOpen = true
+          }
+        }
+
+        ActionIcon {
+          kind: "logs"
+          foreground: root.bar.foreground
+          tooltipText: "View logs"
+          onClicked: {
+            root.logsViewOpen = true
+            docker.fetchLogs(row.container.id)
           }
         }
 
