@@ -34,6 +34,7 @@ Item {
   function refresh() {
     if (psProcess.running) return
     root.loading = true
+    psProcess._exitedNormally = false
     psProcess.running = true
   }
 
@@ -80,12 +81,26 @@ Item {
     id: psProcess
     running: false
     command: ["docker", "ps", "-a", "--format", "{{json .}}"]
+    property bool _exitedNormally: false
     stdout: StdioCollector { id: psStdout; waitForEnd: true }
     stderr: StdioCollector { id: psStderr; waitForEnd: true }
     onExited: function(exitCode) {
+      psProcess._exitedNormally = true
       root.loading = false
       if (exitCode === 0) root.applyContainers(psStdout.text || "")
       else root.applyError(psStderr.text || psStdout.text || "")
+    }
+    onRunningChanged: {
+      if (!running && !psProcess._exitedNormally) {
+        // Quickshell's Process never emits `exited` when the command itself
+        // fails to spawn (e.g. the "docker" binary is missing) — only
+        // `runningChanged` fires in that case. Without this branch, a
+        // missing Docker install would leave `loading` stuck true forever
+        // with no error ever shown, since nothing else observes that path.
+        root.dockerAvailable = false
+        root.loading = false
+        root.applyError("")
+      }
     }
   }
 
