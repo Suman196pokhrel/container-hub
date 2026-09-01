@@ -91,3 +91,24 @@ test('statusColorFor classifies running, unhealthy, and stopped containers', () 
   assert.equal(Model.statusColorFor({ isRunning: false, healthStatus: 'none' }), 'stopped')
   assert.equal(Model.statusColorFor(null), 'stopped')
 })
+
+test('classifyDockerError reports not-installed when the binary is missing', () => {
+  const result = Model.classifyDockerError(false, '')
+  assert.equal(result.kind, 'not-installed')
+})
+
+test('classifyDockerError reports permission-denied', () => {
+  const result = Model.classifyDockerError(true, 'permission denied while trying to connect to the Docker daemon socket')
+  assert.equal(result.kind, 'permission-denied')
+})
+
+test('classifyDockerError reports daemon-down', () => {
+  const result = Model.classifyDockerError(true, 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?')
+  assert.equal(result.kind, 'daemon-down')
+})
+
+test('classifyDockerError falls back to unknown with a truncated message', () => {
+  const result = Model.classifyDockerError(true, 'some other failure')
+  assert.equal(result.kind, 'unknown')
+  assert.equal(result.message, 'some other failure')
+})

@@ -83,6 +83,22 @@ function statusColorFor(container) {
   return "stopped"
 }
 
+function classifyDockerError(dockerAvailable, stderrText) {
+  if (!dockerAvailable) {
+    return { kind: "not-installed", message: "Docker is not installed or not on PATH." }
+  }
+  var text = String(stderrText || "")
+  var lowered = text.toLowerCase()
+  if (lowered.indexOf("permission denied") !== -1) {
+    return { kind: "permission-denied", message: "Permission denied. Add your user to the docker group and log back in." }
+  }
+  if (lowered.indexOf("cannot connect to the docker daemon") !== -1 || lowered.indexOf("is the docker daemon running") !== -1) {
+    return { kind: "daemon-down", message: "Docker daemon is not running." }
+  }
+  var trimmed = text.replace(/\s+/g, " ").trim()
+  return { kind: "unknown", message: trimmed.length > 0 ? trimmed.substring(0, 140) : "Could not read Docker status." }
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parsePorts: parsePorts,
@@ -90,6 +106,7 @@ if (typeof module !== "undefined") {
     parseContainerLine: parseContainerLine,
     sortContainers: sortContainers,
     parseContainerList: parseContainerList,
-    statusColorFor: statusColorFor
+    statusColorFor: statusColorFor,
+    classifyDockerError: classifyDockerError
   }
 }
