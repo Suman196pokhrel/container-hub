@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.suman196pokhrel.container-hub",
   "name": "Container Hub",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Suman Pokhrel",
   "license": "MIT",
   "description": "Monitor and manage local Docker containers from the Omarchy bar: view status, ports, and logs; start, stop, or remove containers without leaving your desktop.",

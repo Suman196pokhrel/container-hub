@@ -112,3 +112,34 @@ test('classifyDockerError falls back to unknown with a truncated message', () =>
   assert.equal(result.kind, 'unknown')
   assert.equal(result.message, 'some other failure')
 })
+
+test('parseContainerLine clamps oversized fields instead of storing them whole', () => {
+  const huge = 'x'.repeat(Model.MAX_FIELD_LEN + 5000)
+  const line = JSON.stringify({
+    ID: '1', Image: huge, Names: huge, State: 'running', Status: huge,
+    HealthStatus: 'none', Ports: '', CreatedAt: ''
+  })
+  const result = Model.parseContainerLine(line)
+  assert.equal(result.image.length, Model.MAX_FIELD_LEN)
+  assert.equal(result.name.length, Model.MAX_FIELD_LEN)
+  assert.equal(result.statusText.length, Model.MAX_FIELD_LEN)
+})
+
+test('parseContainerLine rejects a line longer than MAX_LINE_LEN', () => {
+  const line = JSON.stringify({ ID: '1', Names: 'x'.repeat(Model.MAX_LINE_LEN) })
+  assert.equal(Model.parseContainerLine(line), null)
+})
+
+test('parsePorts caps the number of tokens it will process', () => {
+  const manyPorts = Array.from({ length: Model.MAX_PORTS + 50 }, (_, i) => `${i + 1}/tcp`).join(', ')
+  const result = Model.parsePorts(manyPorts)
+  assert.ok(result.length <= Model.MAX_PORTS)
+})
+
+test('parseContainerList caps the number of containers it will return', () => {
+  const lines = Array.from({ length: Model.MAX_CONTAINERS + 50 }, (_, i) =>
+    JSON.stringify({ ID: String(i), Image: 'x', Names: 'c' + i, State: 'running', Status: 'Up', HealthStatus: 'none', Ports: '', CreatedAt: '' })
+  ).join('\n')
+  const result = Model.parseContainerList(lines)
+  assert.equal(result.length, Model.MAX_CONTAINERS)
+})

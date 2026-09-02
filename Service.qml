@@ -9,11 +9,16 @@ Item {
   property bool panelOpen: false
 
   property bool dockerAvailable: true
+  property string dockerPath: ""
   property string errorKind: ""
   property string errorMessage: ""
+  property string actionErrorMessage: ""
   property var containers: []
   property int runningCount: 0
   property bool loading: false
+
+  property int consecutiveFailures: 0
+  readonly property int backoffMultiplier: Math.min(5, 1 + root.consecutiveFailures)
 
   readonly property int refreshIntervalOpenSec: intSetting("refreshIntervalOpenSec", 3, 1, 60)
   readonly property int refreshIntervalClosedSec: intSetting("refreshIntervalClosedSec", 15, 5, 300)
@@ -38,10 +43,13 @@ Item {
   }
 
   function refresh() {
-    if (psProcess.running) return
+    // dockerPath is only set once the resolved binary has passed validation
+    // (see pathResolver/pathValidator below); before that, or if validation
+    // ever failed, there is nothing safe to run yet.
+    if (root.dockerPath === "") return
+    if (sudoCheck.running || psProcess.running) return
     root.loading = true
-    psProcess._exitedNormally = false
-    psProcess.running = true
+    sudoCheck.start()
   }
 
   function applyContainers(stdout) {
@@ -63,13 +71,20 @@ Item {
     root.errorMessage = classified.message
   }
 
+  function containerExists(id) {
+    for (var i = 0; i < root.containers.length; i++) {
+      if (root.containers[i].id === id) return true
+    }
+    return false
+  }
+
   function fetchLogs(id) {
-    if (logsProcess.running) return
+    if (root.dockerPath === "" || logsProcess.running) return
     root.logsLoading = true
     root.logsContainerId = id
     root.logsText = ""
-    logsProcess.command = ["docker", "logs", "--tail", String(root.logTailLines), "--timestamps", id]
-    logsProcess.running = true
+    logsProcess.command = [root.dockerPath, "logs", "--tail", String(root.logTailLines), "--timestamps", id]
+    logsProcess.start()
   }
 
   function clearLogs() {
@@ -77,93 +92,187 @@ Item {
     root.logsText = ""
   }
 
+  function stopContainer(id) { runAction([root.dockerPath, "stop", id], "stop container") }
+  function startContainer(id) { runAction([root.dockerPath, "start", id], "start container") }
+  function removeContainer(id) { runAction([root.dockerPath, "rm", "-f", id], "remove container") }
+
+  function runAction(command, label) {
+    if (root.dockerPath === "") return
+    if (actionProcess.running) {
+      // A prior action (e.g. "stop", which can hold the process for a full
+      // 10s grace period) is still in flight. Say so instead of silently
+      // dropping this one — the old behavior looked like a missed click.
+      root.actionErrorMessage = "Another action is still running; try again in a moment."
+      return
+    }
+    root.actionErrorMessage = ""
+    actionProcess._label = label
+    actionProcess.command = command
+    actionProcess.start()
+  }
+
   onPanelOpenChanged: refreshTimer.restart()
 
   Timer {
     id: refreshTimer
-    interval: (root.panelOpen ? root.refreshIntervalOpenSec : root.refreshIntervalClosedSec) * 1000
+    // Repeated poll failures (daemon down, socket unreachable) back off up
+    // to 5x the configured interval instead of retrying unbounded at full
+    // speed; a single success resets it.
+    interval: (root.panelOpen ? root.refreshIntervalOpenSec : root.refreshIntervalClosedSec) * 1000 * root.backoffMultiplier
     running: true
     repeat: true
     triggeredOnStart: true
     onTriggered: root.refresh()
   }
 
-  Process {
-    id: whichProcess
+  // Startup: resolve "docker" off PATH once, then validate the resolved
+  // path is a root-owned, non-group/other-writable regular file before it
+  // is ever used. Every later invocation uses this literal absolute path,
+  // never a bare "docker" lookup, since PATH is attacker-influenceable and
+  // the daemon this binary talks to is root-equivalent.
+  BoundedProcess {
+    id: pathResolver
     command: ["which", "docker"]
-    onExited: function(exitCode) {
-      root.dockerAvailable = exitCode === 0
+    timeoutMs: 5000
+    onFinished: {
+      if (failedToSpawn || timedOut || exitCode !== 0) {
+        root.dockerAvailable = false
+        root.loading = false
+        root.applyError("")
+        return
+      }
+      var candidate = (stdoutText.split("\n")[0] || "").trim()
+      if (candidate === "" || candidate.charAt(0) !== "/") {
+        root.dockerAvailable = false
+        root.loading = false
+        root.applyError("")
+        return
+      }
+      pathValidator._candidate = candidate
+      pathValidator.command = ["stat", "-L", "-c", "%F|%u|%a", candidate]
+      pathValidator.start()
+    }
+  }
+
+  BoundedProcess {
+    id: pathValidator
+    timeoutMs: 5000
+    property string _candidate: ""
+    onFinished: {
+      if (failedToSpawn || timedOut || exitCode !== 0) {
+        root.dockerAvailable = false
+        root.errorKind = "unsafe-binary"
+        root.errorMessage = "Could not verify the Docker binary at " + pathValidator._candidate + "."
+        root.loading = false
+        return
+      }
+      var parts = stdoutText.trim().split("|")
+      var kind = parts[0] || ""
+      var uid = parts[1] || ""
+      var mode = parseInt(parts[2] || "0", 8)
+      var ownedByRoot = uid === "0"
+      var notGroupOrOtherWritable = (mode & 0o022) === 0
+      if (kind !== "regular file" || !ownedByRoot || !notGroupOrOtherWritable) {
+        root.dockerAvailable = false
+        root.errorKind = "unsafe-binary"
+        root.errorMessage = "Docker binary at " + pathValidator._candidate + " failed a safety check (expected a root-owned, non-writable regular file)."
+        root.loading = false
+        return
+      }
+      root.dockerPath = pathValidator._candidate
+      root.dockerAvailable = true
       root.refresh()
     }
   }
 
-  Process {
-    id: psProcess
-    running: false
-    command: ["docker", "ps", "-a", "--format", "{{json .}}"]
-    property bool _exitedNormally: false
-    stdout: StdioCollector { id: psStdout; waitForEnd: true }
-    stderr: StdioCollector { id: psStderr; waitForEnd: true }
-    onExited: function(exitCode) {
-      psProcess._exitedNormally = true
-      root.loading = false
-      if (exitCode === 0) root.applyContainers(psStdout.text || "")
-      else root.applyError(psStderr.text || psStdout.text || "")
-    }
-    onRunningChanged: {
-      if (!running && !psProcess._exitedNormally) {
-        // Quickshell's Process never emits `exited` when the command itself
-        // fails to spawn (e.g. the "docker" binary is missing) — only
-        // `runningChanged` fires in that case. Without this branch, a
-        // missing Docker install would leave `loading` stuck true forever
-        // with no error ever shown, since nothing else observes that path.
-        root.dockerAvailable = false
+  // Omarchy deliberately keeps users out of the (root-equivalent) docker
+  // group by default; this is a cheap local check with no daemon call and
+  // no prompt, so it is safe to run ahead of every poll.
+  BoundedProcess {
+    id: sudoCheck
+    command: ["omarchy-sudo-docker"]
+    timeoutMs: 5000
+    onFinished: {
+      if (!failedToSpawn && !timedOut && exitCode === 0) {
         root.loading = false
-        root.applyError("")
+        root.containers = []
+        root.runningCount = 0
+        root.errorKind = "needs-docker-access"
+        root.errorMessage = "Docker access needs one-time setup: your user isn't in the docker group. Omarchy keeps that opt-in because it's root-equivalent."
+        root.consecutiveFailures = 0
+        return
+      }
+      // Helper missing or inconclusive: fall through to the direct attempt,
+      // whose own permission-denied classification is the fallback signal.
+      psProcess.command = [root.dockerPath, "ps", "-a", "--format", "{{json .}}"]
+      psProcess.start()
+    }
+  }
+
+  BoundedProcess {
+    id: psProcess
+    timeoutMs: 10000
+    maxOutChars: 400000
+    maxErrChars: 16384
+    onFinished: {
+      root.loading = false
+      if (!failedToSpawn && !timedOut && exitCode === 0) {
+        root.applyContainers(stdoutText)
+        root.consecutiveFailures = 0
+      } else {
+        root.consecutiveFailures = Math.min(root.consecutiveFailures + 1, 20)
+        if (failedToSpawn) {
+          root.dockerAvailable = false
+          root.applyError("")
+        } else if (timedOut) {
+          // A direct state, not routed through Model.classifyDockerError:
+          // that classifier pattern-matches Docker's own stderr text, and
+          // this message is ours, not Docker's.
+          root.containers = []
+          root.runningCount = 0
+          root.errorKind = "timeout"
+          root.errorMessage = "Docker did not respond in time."
+        } else {
+          root.applyError(stderrText || stdoutText || "")
+        }
       }
     }
   }
 
-  function stopContainer(id) {
-    runAction(["docker", "stop", id])
-  }
-
-  function startContainer(id) {
-    runAction(["docker", "start", id])
-  }
-
-  function removeContainer(id) {
-    runAction(["docker", "rm", "-f", id])
-  }
-
-  function runAction(command) {
-    if (actionProcess.running) return
-    actionProcess.command = command
-    actionProcess.running = true
-  }
-
-  Process {
+  BoundedProcess {
     id: actionProcess
-    running: false
-    command: []
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: root.refresh()
-  }
-
-  Process {
-    id: logsProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: logsStdout; waitForEnd: true }
-    stderr: StdioCollector { id: logsStderr; waitForEnd: true }
-    onExited: function(exitCode) {
-      root.logsLoading = false
-      root.logsText = exitCode === 0
-        ? (logsStdout.text || "(no output)")
-        : "Could not read logs: " + (logsStderr.text || logsStdout.text || "unknown error")
+    timeoutMs: 20000
+    maxOutChars: 8192
+    maxErrChars: 8192
+    property string _label: ""
+    onFinished: {
+      if (failedToSpawn || timedOut || exitCode !== 0) {
+        var reason = timedOut ? "timed out" : (stderrText || stdoutText || "unknown error").trim()
+        root.actionErrorMessage = "Could not " + actionProcess._label + ": " + reason.substring(0, 200)
+      } else {
+        root.actionErrorMessage = ""
+      }
+      root.refresh()
     }
   }
 
-  Component.onCompleted: whichProcess.running = true
+  BoundedProcess {
+    id: logsProcess
+    timeoutMs: 15000
+    maxOutChars: 500000
+    maxErrChars: 16384
+    onFinished: {
+      root.logsLoading = false
+      if (!failedToSpawn && !timedOut && exitCode === 0) {
+        var text = stdoutText || "(no output)"
+        if (stdoutTruncated) text += "\n\n[output truncated]"
+        root.logsText = text
+      } else {
+        var reason = timedOut ? "timed out" : (stderrText || stdoutText || "unknown error")
+        root.logsText = "Could not read logs: " + reason
+      }
+    }
+  }
+
+  Component.onCompleted: pathResolver.start()
 }

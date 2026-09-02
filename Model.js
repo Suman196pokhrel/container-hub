@@ -1,7 +1,22 @@
+// Defense-in-depth caps on top of the bounded process reader in Service.qml:
+// a container's name/image/status/ports are attacker-influenced (an image tag,
+// a container name, log-adjacent status text) and get stored + rendered, so
+// each field is clamped independently of whatever byte budget the reader
+// enforced upstream.
+var MAX_FIELD_LEN = 256
+var MAX_PORTS = 64
+var MAX_CONTAINERS = 500
+var MAX_LINE_LEN = 65536
+
+function clamp(value, maxLen) {
+  var text = String(value || "")
+  return text.length > maxLen ? text.substring(0, maxLen) : text
+}
+
 function parsePorts(portsRaw) {
   var text = String(portsRaw || "").trim()
   if (!text) return []
-  var tokens = text.split(",").map(function(t) { return t.trim() }).filter(function(t) { return t.length > 0 })
+  var tokens = text.split(",").slice(0, MAX_PORTS).map(function(t) { return t.trim() }).filter(function(t) { return t.length > 0 })
   var seen = {}
   var result = []
   for (var i = 0; i < tokens.length; i++) {
@@ -32,24 +47,24 @@ function formatPortsDisplay(ports) {
 
 function parseContainerLine(line) {
   var text = String(line || "").trim()
-  if (!text) return null
+  if (!text || text.length > MAX_LINE_LEN) return null
   var raw
   try {
     raw = JSON.parse(text)
   } catch (e) {
     return null
   }
-  var state = String(raw.State || "").toLowerCase()
+  var state = clamp(String(raw.State || "").toLowerCase(), MAX_FIELD_LEN)
   return {
-    id: String(raw.ID || ""),
-    name: String(raw.Names || ""),
-    image: String(raw.Image || ""),
+    id: clamp(raw.ID, MAX_FIELD_LEN),
+    name: clamp(raw.Names, MAX_FIELD_LEN),
+    image: clamp(raw.Image, MAX_FIELD_LEN),
     state: state,
-    statusText: String(raw.Status || ""),
-    healthStatus: String(raw.HealthStatus || "none"),
+    statusText: clamp(raw.Status, MAX_FIELD_LEN),
+    healthStatus: clamp(raw.HealthStatus || "none", MAX_FIELD_LEN),
     isRunning: state === "running",
     ports: parsePorts(raw.Ports),
-    createdAt: String(raw.CreatedAt || "")
+    createdAt: clamp(raw.CreatedAt, MAX_FIELD_LEN)
   }
 }
 
@@ -69,7 +84,7 @@ function sortContainers(containers) {
 function parseContainerList(rawStdout) {
   var lines = String(rawStdout || "").split("\n")
   var containers = []
-  for (var i = 0; i < lines.length; i++) {
+  for (var i = 0; i < lines.length && containers.length < MAX_CONTAINERS; i++) {
     var parsed = parseContainerLine(lines[i])
     if (parsed) containers.push(parsed)
   }
@@ -107,6 +122,10 @@ if (typeof module !== "undefined") {
     sortContainers: sortContainers,
     parseContainerList: parseContainerList,
     statusColorFor: statusColorFor,
-    classifyDockerError: classifyDockerError
+    classifyDockerError: classifyDockerError,
+    MAX_FIELD_LEN: MAX_FIELD_LEN,
+    MAX_PORTS: MAX_PORTS,
+    MAX_CONTAINERS: MAX_CONTAINERS,
+    MAX_LINE_LEN: MAX_LINE_LEN
   }
 }

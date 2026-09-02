@@ -221,6 +221,23 @@ Panel {
             foreground: root.bar.foreground
           }
 
+          Text {
+            textFormat: Text.PlainText
+            visible: docker.actionErrorMessage !== ""
+            width: parent.width
+            text: docker.actionErrorMessage + "  (tap to dismiss)"
+            color: Color.urgent
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: docker.actionErrorMessage = ""
+            }
+          }
+
           GridLayout {
             visible: docker.errorKind === ""
             width: parent.width
@@ -265,6 +282,20 @@ Panel {
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
             wrapMode: Text.WordWrap
+          }
+
+          Button {
+            visible: docker.errorKind === "needs-docker-access"
+            text: "Enable Docker access"
+            tooltipText: "Opens omarchy-setup-security-sudoless-docker in a terminal"
+            foreground: Color.accent
+            accent: Color.accent
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(5)
+            bordered: true
+            onClicked: Quickshell.execDetached(["omarchy-launch-tui", "omarchy-setup-security-sudoless-docker"])
           }
 
           Text {
@@ -412,7 +443,14 @@ Panel {
         foreground: root.bar.foreground
         onCanceled: root.confirmRemoveOpen = false
         onConfirmed: {
-          docker.removeContainer(root.pendingRemoveId)
+          // The list can have refreshed since this dialog opened; re-check
+          // the immutable id is still present rather than firing `rm -f`
+          // blind at whatever was true when the dialog was opened.
+          if (docker.containerExists(root.pendingRemoveId)) {
+            docker.removeContainer(root.pendingRemoveId)
+          } else {
+            docker.actionErrorMessage = "\"" + root.pendingRemoveName + "\" is already gone; nothing removed."
+          }
           root.confirmRemoveOpen = false
         }
       }
