@@ -3,10 +3,10 @@
 The best Omarchy plugin for container monitoring: a clean bar panel for
 watching and managing local containers without dropping to a terminal.
 
-Container Hub is actively in development. The Docker MVP is done: listing,
-status, ports, logs, start, stop, and remove are all working. Next up is
-Podman support, followed by final polish, performance work, and reliability
-optimizations.
+Container Hub is actively in development. Docker and Podman are both
+supported: listing, status, ports, logs, start, stop, and remove all work
+on either engine, with a one-click tab to switch between them. Next up is
+final polish, performance work, and reliability optimizations.
 
 ## Preview
 
@@ -16,14 +16,14 @@ optimizations.
 
 ## Features
 
-- Lists all Docker containers (running and stopped) with status and ports
+- Docker and Podman side by side — a tab in the panel switches between
+  them, both keep polling in the background so switching is instant
+- Lists all containers (running and stopped) with status and ports
 - Start / stop / remove containers with one click
-- View recent logs inline, or open the container in `lazydocker` for
-  anything more involved
+- View recent logs inline, or (Docker only — no Podman equivalent exists
+  yet) open the container in `lazydocker` for anything more involved
 - Click a published port to open it in the browser
-- Bar badge shows the running container count
-
-Docker is supported now. Podman support is planned next.
+- Bar badge shows the running container count across both engines
 
 ## Install
 
@@ -58,6 +58,10 @@ anything — Container Hub never runs it, or any privileged command, on your
 behalf. Prefer not to grant that? "Open in lazydocker" still works from the
 same no-access state: Omarchy's `omarchy-launch-docker-tui` reaches the
 socket through a one-off `pkexec` prompt instead.
+
+Podman has no equivalent setup step: rootless Podman (the default) has no
+daemon socket to guard, so its tab works immediately if Podman is
+installed, with no group membership or privilege prompt involved at all.
 
 ## Configuration
 

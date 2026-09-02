@@ -7,9 +7,9 @@ containers, so a fullstack developer working across several projects
 doesn't have to drop to a terminal just to check what's running, tail logs,
 or stop/remove a container.
 
-MVP scope was Docker only. Podman now runs underneath as a second engine
-(see "Engine abstraction" below) but is not yet exposed in the UI —
-`Panel.qml` only ever shows the Docker engine this phase.
+MVP scope was Docker only; Podman is now a first-class second engine with
+its own tab in the panel (see "Engine abstraction" below) — same actions,
+same hardening, switchable with one click.
 
 ## Scope
 
@@ -32,8 +32,9 @@ an unbounded `logs -f` piped into it could wedge the UI for everyone.
 Instead: a manual-refresh tail view inline, plus an **"Open in
 lazydocker"** button that shells out to Omarchy's existing
 `omarchy-launch-docker-tui` for anything beyond that (live follow, exec,
-stats, restart) — Docker only; Podman has no equivalent button yet since it
-has no UI at all this phase.
+stats, restart) — Docker only; Podman has no equivalent TUI available via
+Omarchy, so the button is hidden entirely on the Podman tab rather than
+shown disabled or pointed at the wrong daemon.
 
 Docker-unreachable is a first-class state with several distinguishable
 causes: not installed, access not set up (the proactive `omarchy-sudo-docker`
@@ -62,7 +63,9 @@ engines/
   shared.js                  # clamp/cap constants, sortContainers, formatPortsDisplay, statusColorFor, id validation
   docker.js                   # Docker command builders + ps-JSON -> container mapping
   podman.js                    # Podman command builders + ps-JSON -> container mapping
-ContainerIcon.qml    # vector icon (QtQuick.Shapes), theme-colored
+ContainerIcon.qml    # vector icon (QtQuick.Shapes), theme-colored — the plugin's own bar/header icon
+DockerIcon.qml        # Docker's brand mark (traced SVG path), used by the engine tab only
+PodmanIcon.qml          # Podman's brand mark (traced SVG path), used by the engine tab only
 README.md
 docs/design.md    # this file
 docs/superpowers/specs/2026-09-02-podman-integration-design.md
@@ -103,9 +106,13 @@ was written once, in response to a marketplace security review of the
 Docker-only version, and Podman inherits it by construction rather than
 needing a second, parallel implementation.
 
-This phase adds no UI: `Panel.qml` only ever instantiates the Docker engine
-(`ContainerEngine { engineName: "docker" }`). A future phase adds a
-switcher.
+`Panel.qml` instantiates both engines (`dockerEngine`, `podmanEngine`)
+side by side and keeps both polling continuously whenever the panel is
+open, regardless of which tab is showing — switching tabs is instant, not
+a reload, since the non-active engine's data is already current. Only one
+engine's `containers`/stats/logs feed the visible body at a time, chosen
+by `root.active` (`selectedEngine === "podman" ? podmanEngine :
+dockerEngine`).
 
 ## Data flow
 
@@ -152,11 +159,12 @@ reach a destructive `rm -f`), two-speed:
 `refresh()` is guarded (`if (proc.running) return`) and re-triggered
 immediately after any action settles (stop/start/remove). Consecutive poll
 failures back the interval off up to 5x the configured value; a single
-success resets it. Before every poll (Docker only — see Engine abstraction),
-a cheap local check (`omarchy-sudo-docker`, no daemon call, no prompt) asks
-whether Docker needs elevated access right now; if so, the poll is skipped
-in favor of the access-not-set-up state instead of hammering `ps` into a
-guaranteed permission error.
+success resets it. Before every Docker poll (Podman's `needsAccessCheck` is
+`false`, so it skips this — see Engine abstraction), a cheap local check
+(`omarchy-sudo-docker`, no daemon call, no prompt) asks whether Docker
+needs elevated access right now; if so, the poll is skipped in favor of the
+access-not-set-up state instead of hammering `ps` into a guaranteed
+permission error.
 
 Removing a container queries the daemon fresh (`inspect`, via
 `ActionRunner.checkExists()`) immediately before firing `rm -f`, rather than
@@ -201,24 +209,38 @@ colors.
 
 ## UI
 
-- Bar button: `ContainerIcon` + running-count badge, built on the shared
-  `BarWidget`/`WidgetButton` base.
-- Panel: header with total/running counts and a manual refresh icon, then a
-  scrollable list of container rows (name, image, status pill, ports,
-  action icons via `PanelActionButton`), built on the shared
-  `Panel`/`KeyboardPanel` base for keyboard nav, Escape-to-close, and popout
-  switching.
+- Bar button: `ContainerIcon` + a running-count badge summed across *both*
+  engines (so "is anything running?" is answerable without opening the
+  panel), built on the shared `BarWidget`/`WidgetButton` base. Badge turns
+  urgent only for a genuine failure on the selected engine (daemon down,
+  timeout, unsafe binary, ...) — "not installed"/"access not set up" are
+  expected baseline states for most users, not alarms.
+- Engine tab row: two segments, each showing that engine's real brand mark
+  (`DockerIcon`/`PodmanIcon`, traced from official SVGs — not the plugin's
+  own generic `ContainerIcon`) plus a small dot (accent = has running
+  containers, urgent = has an error, muted = neither) so both engines are
+  glanceable without switching. The selected tab gets an accent-tinted fill
+  in its own brand color (`BorderSurface`, same treatment as a stat tile);
+  the other stays quiet. One click swaps which engine's data drives
+  everything below — both engines keep polling regardless of which tab is
+  showing, so the swap is instant.
+- Panel: header with total/running counts (for whichever engine is
+  selected) and a manual refresh icon, then a scrollable list of container
+  rows (name, image, status pill, ports, action icons via
+  `PanelActionButton`), built on the shared `Panel`/`KeyboardPanel` base
+  for keyboard nav, Escape-to-close, and popout switching.
 - Remove uses the shared `ConfirmDialog` component.
 - Logs is a second content state inside the same panel (a back action
   returns to the list) — not a separate window.
-- Docker only this phase — see Engine abstraction.
 
 ## Settings
 
 Exposed via `manifest.json`'s `barWidget.schema` (editable from Omarchy's
 plugin settings UI): `refreshIntervalOpenSec`, `refreshIntervalClosedSec`,
-`logTailLines`. Shared by both engines; no per-engine settings exist yet
-since only Docker has a UI to configure them from.
+`logTailLines`. Shared by both engines — no per-engine settings exist, by
+choice: both engines' subprocess behavior is close enough (same deadlines,
+same caps) that separate knobs would just be more settings to explain for
+no real benefit.
 
 ## Testing
 
@@ -236,11 +258,11 @@ deleted afterward, not committed.
 
 ## Out of scope for MVP
 
-- A UI for Podman (engine/list switcher) — the engine itself works, nothing
-  shows it yet
 - Podman health status (`inspect` per container beyond the pre-remove
   check) — always `"none"` in the list, since `ps` doesn't expose it
 - Podman rootful mode / `podman --remote`
+- A Podman equivalent of the "Open in lazydocker" button — no such TUI is
+  available via Omarchy today
 - Live-streaming logs into the shell process
 - Container creation / image management / compose project awareness
 - Exec-into-container

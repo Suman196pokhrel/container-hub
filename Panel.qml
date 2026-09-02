@@ -16,6 +16,10 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  property string selectedEngine: "docker" // "docker" | "podman" — which tab is showing
+  readonly property var active: selectedEngine === "podman" ? podmanEngine : dockerEngine
+  readonly property bool isDocker: selectedEngine === "docker"
+
   property string pendingRemoveId: ""
   property string pendingRemoveName: ""
   property bool confirmRemoveOpen: false
@@ -27,32 +31,50 @@ Panel {
   readonly property color quietAction: Qt.darker(root.bar.foreground, 1.65)
   readonly property color panelFill: Style.normalFillFor(root.bar.foreground, Color.accent)
   readonly property color panelHoverFill: Style.hoverFillFor(root.bar.foreground, Color.accent)
-  readonly property var runningContainers: docker.containers.filter(function(c) { return c && c.isRunning })
-  readonly property var inactiveContainers: docker.containers.filter(function(c) { return c && !c.isRunning })
-  readonly property int inactiveCount: Math.max(0, docker.containers.length - docker.runningCount)
+  readonly property var runningContainers: active.containers.filter(function(c) { return c && c.isRunning })
+  readonly property var inactiveContainers: active.containers.filter(function(c) { return c && !c.isRunning })
+  readonly property int inactiveCount: Math.max(0, active.containers.length - active.runningCount)
   readonly property int unhealthyCount: {
     var count = 0
-    for (var i = 0; i < docker.containers.length; i++) {
-      var container = docker.containers[i]
+    for (var i = 0; i < active.containers.length; i++) {
+      var container = active.containers[i]
       if (container && container.isRunning && container.healthStatus === "unhealthy") count++
     }
     return count
   }
 
+  // Bar badge sums both engines so "anything running?" is answerable
+  // without opening the panel or switching tabs. "Not installed"/"access
+  // not set up" are expected baseline states (most users won't have both
+  // engines), not problems worth a red badge — only genuine failures are.
+  readonly property int totalRunningCount: dockerEngine.runningCount + podmanEngine.runningCount
+  readonly property var _errorKinds: (["daemon-down", "timeout", "unsafe-binary", "unknown", "permission-denied"])
+  readonly property bool activeHasError: root._errorKinds.indexOf(active.errorKind) !== -1
+
   onOpenedChanged: {
-    docker.panelOpen = root.opened
-    if (root.opened) docker.refresh()
-    else {
+    dockerEngine.panelOpen = root.opened
+    podmanEngine.panelOpen = root.opened
+    if (root.opened) {
+      dockerEngine.refresh()
+      podmanEngine.refresh()
+    } else {
       root.confirmRemoveOpen = false
       root.logsViewOpen = false
       root.logsContainerName = ""
-      docker.clearLogs()
+      dockerEngine.clearLogs()
+      podmanEngine.clearLogs()
     }
   }
 
   ContainerEngine {
-    id: docker
+    id: dockerEngine
     engineName: "docker"
+    settings: root.settings
+  }
+
+  ContainerEngine {
+    id: podmanEngine
+    engineName: "podman"
     settings: root.settings
   }
 
@@ -65,7 +87,7 @@ Panel {
     hasVisualContent: true
     fixedWidth: vertical ? -1 : Math.max(Style.bar.iconSlot, Style.bar.iconCanvas + Style.space(22))
 
-    readonly property color badgeColor: docker.errorKind !== "" ? Color.urgent : (docker.runningCount > 0 ? Color.accent : root.secondaryText)
+    readonly property color badgeColor: root.activeHasError ? Color.urgent : (root.totalRunningCount > 0 ? Color.accent : root.secondaryText)
 
     RowLayout {
       anchors.centerIn: parent
@@ -79,10 +101,10 @@ Panel {
 
       Text {
         id: countLabel
-        visible: docker.runningCount > 0 && !button.vertical
+        visible: root.totalRunningCount > 0 && !button.vertical
         Layout.alignment: Qt.AlignVCenter
         textFormat: Text.PlainText
-        text: String(docker.runningCount)
+        text: String(root.totalRunningCount)
         color: button.badgeColor
         opacity: 1.0
         font.family: Style.font.family
@@ -92,7 +114,7 @@ Panel {
     }
 
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) docker.refresh()
+      if (buttonCode === Qt.RightButton) { dockerEngine.refresh(); podmanEngine.refresh() }
       else root.toggle()
     }
   }
@@ -177,7 +199,7 @@ Panel {
               Text {
                 width: parent.width
                 textFormat: Text.PlainText
-                text: docker.errorKind !== "" ? "DOCKER STATUS" : (docker.loading ? "REFRESHING CONTAINERS" : docker.runningCount + " RUNNING · " + docker.containers.length + " TOTAL")
+                text: active.errorKind !== "" ? (root.isDocker ? "DOCKER STATUS" : "PODMAN STATUS") : (active.loading ? "REFRESHING CONTAINERS" : active.runningCount + " RUNNING · " + active.containers.length + " TOTAL")
                 color: root.secondaryText
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
@@ -193,6 +215,7 @@ Panel {
               spacing: Style.space(6)
 
               PanelActionButton {
+                visible: root.isDocker
                 iconText: "󰒓"
                 tooltipText: "Open lazydocker"
                 foreground: root.secondaryText
@@ -213,9 +236,17 @@ Panel {
                 fontSize: Style.font.subtitle
                 size: Style.space(24)
                 bordered: true
-                onClicked: docker.refresh()
+                onClicked: active.refresh()
               }
             }
+          }
+
+          RowLayout {
+            width: parent.width
+            spacing: Style.space(8)
+
+            EngineTab { kind: "docker"; engineRef: dockerEngine }
+            EngineTab { kind: "podman"; engineRef: podmanEngine }
           }
 
           PanelSeparator {
@@ -224,9 +255,9 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            visible: docker.actionErrorMessage !== ""
+            visible: active.actionErrorMessage !== ""
             width: parent.width
-            text: docker.actionErrorMessage + "  (tap to dismiss)"
+            text: active.actionErrorMessage + "  (tap to dismiss)"
             color: Color.urgent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -235,12 +266,12 @@ Panel {
             MouseArea {
               anchors.fill: parent
               cursorShape: Qt.PointingHandCursor
-              onClicked: docker.actionErrorMessage = ""
+              onClicked: active.actionErrorMessage = ""
             }
           }
 
           GridLayout {
-            visible: docker.errorKind === ""
+            visible: active.errorKind === ""
             width: parent.width
             columns: 4
             columnSpacing: Style.space(6)
@@ -248,14 +279,14 @@ Panel {
 
             StatTile {
               label: "RUNNING"
-              value: String(docker.runningCount)
-              valueColor: docker.runningCount > 0 ? Color.accent : root.bar.foreground
+              value: String(active.runningCount)
+              valueColor: active.runningCount > 0 ? Color.accent : root.bar.foreground
               Layout.fillWidth: true
             }
 
             StatTile {
               label: "TOTAL"
-              value: String(docker.containers.length)
+              value: String(active.containers.length)
               Layout.fillWidth: true
             }
 
@@ -276,9 +307,9 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            visible: docker.errorKind !== ""
+            visible: active.errorKind !== ""
             width: parent.width
-            text: docker.errorMessage
+            text: active.errorMessage
             color: Color.urgent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
@@ -286,7 +317,7 @@ Panel {
           }
 
           Button {
-            visible: docker.errorKind === "needs-docker-access"
+            visible: active.errorKind === "needs-docker-access"
             text: "Enable Docker access"
             tooltipText: "Opens omarchy-setup-security-sudoless-docker in a terminal"
             foreground: Color.accent
@@ -301,7 +332,7 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            visible: docker.errorKind === "" && docker.containers.length === 0
+            visible: active.errorKind === "" && active.containers.length === 0
             width: parent.width
             text: "No containers found."
             color: root.secondaryText
@@ -313,7 +344,7 @@ Panel {
           Column {
             width: parent.width
             spacing: Style.space(12)
-            visible: docker.errorKind === "" && docker.containers.length > 0
+            visible: active.errorKind === "" && active.containers.length > 0
 
             ContainerSection {
               title: "RUNNING CONTAINERS"
@@ -346,7 +377,7 @@ Panel {
           spacing: Style.space(8)
 
           PanelActionButton {
-            iconText: ""
+            iconText: ""
             size: Style.space(24)
             foreground: root.secondaryText
             hoverColor: root.bar.foreground
@@ -357,7 +388,7 @@ Panel {
             onClicked: {
               root.logsViewOpen = false
               root.logsContainerName = ""
-              docker.clearLogs()
+              active.clearLogs()
             }
           }
 
@@ -380,10 +411,11 @@ Panel {
             fontSize: Style.font.subtitle
             bordered: true
             tooltipText: "Refresh"
-            onClicked: docker.fetchLogs(docker.logsContainerId)
+            onClicked: active.fetchLogs(active.logsContainerId)
           }
 
           PanelActionButton {
+            visible: root.isDocker
             iconText: "󰒓"
             size: Style.space(24)
             foreground: root.secondaryText
@@ -423,7 +455,7 @@ Panel {
               anchors.right: parent.right
               anchors.top: parent.top
               anchors.margins: Style.space(9)
-              text: docker.logsLoading ? "Loading..." : docker.logsText
+              text: active.logsLoading ? "Loading..." : active.logsText
               color: root.bar.foreground
               font.family: "monospace"
               font.pixelSize: Style.font.caption
@@ -446,14 +478,83 @@ Panel {
         onConfirmed: {
           // removeContainer() itself re-queries the daemon fresh (not the
           // polled list, which can be stale) immediately before firing
-          // `rm -f` — see Service.qml. Gating the call here on the cached
-          // containerExists() first would make that fresh check
-          // unreachable whenever the cache happened to be stale in the
-          // wrong direction.
-          docker.removeContainer(root.pendingRemoveId)
+          // `rm -f` — see ContainerEngine.qml.
+          active.removeContainer(root.pendingRemoveId)
           root.confirmRemoveOpen = false
         }
       }
+    }
+  }
+
+  // Engine picker tab — icon + name + a small dot showing "has running
+  // containers" (accent), "has a problem" (urgent), or neither (muted),
+  // so both engines are glanceable without switching. Selected tab gets
+  // an accent-tinted fill in its own brand color; the other stays quiet.
+  component EngineTab: BorderSurface {
+    id: tabBtn
+    property string kind: "docker" // "docker" | "podman"
+    // Passed in explicitly rather than referenced by id (dockerEngine/
+    // podmanEngine) from inside this inline component: only the file's
+    // root id is reliably in scope for an inline `component` block, not
+    // arbitrary sibling ids — confirmed live (referencing the sibling ids
+    // directly left the whole tab row rendering at zero size, silently,
+    // no console error).
+    property var engineRef: null
+    readonly property bool selected: root.selectedEngine === kind
+    readonly property color brandColor: kind === "podman" ? "#892CA0" : "#2496ED"
+    readonly property string label: kind === "podman" ? "Podman" : "Docker"
+    readonly property bool hasRunning: engineRef && engineRef.runningCount > 0
+    readonly property bool hasError: engineRef && root._errorKinds.indexOf(engineRef.errorKind) !== -1
+
+    Layout.fillWidth: true
+    implicitHeight: Style.space(36)
+    color: selected ? root.panelFill : "transparent"
+    borderSpec: selected ? Border.controlSpec("normal", root.bar.foreground, brandColor) : Border.flat("transparent", 0)
+    radius: Style.cornerRadius
+
+    Behavior on color { ColorAnimation { duration: 100 } }
+
+    RowLayout {
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+
+      DockerIcon {
+        visible: tabBtn.kind === "docker"
+        iconSize: Style.font.subtitle
+        color: tabBtn.selected ? tabBtn.brandColor : root.secondaryText
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      PodmanIcon {
+        visible: tabBtn.kind === "podman"
+        iconSize: Style.font.subtitle
+        color: tabBtn.selected ? tabBtn.brandColor : root.secondaryText
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        text: tabBtn.label
+        color: tabBtn.selected ? root.bar.foreground : root.secondaryText
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: tabBtn.selected
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      Rectangle {
+        width: Style.space(6)
+        height: Style.space(6)
+        radius: width / 2
+        color: tabBtn.hasError ? Color.urgent : (tabBtn.hasRunning ? Color.accent : root.mutedText)
+        Layout.alignment: Qt.AlignVCenter
+      }
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.selectedEngine = tabBtn.kind
     }
   }
 
@@ -623,7 +724,7 @@ Panel {
 
           Button {
             visible: row.container.isRunning
-            iconText: ""
+            iconText: ""
             text: "Stop"
             tooltipText: "Stop"
             foreground: root.bar.foreground
@@ -634,12 +735,12 @@ Panel {
             horizontalPadding: Style.space(7)
             verticalPadding: Style.space(4)
             bordered: true
-            onClicked: docker.stopContainer(row.container.id)
+            onClicked: active.stopContainer(row.container.id)
           }
 
           Button {
             visible: !row.container.isRunning
-            iconText: ""
+            iconText: ""
             text: "Start"
             tooltipText: "Start"
             foreground: Color.accent
@@ -650,7 +751,7 @@ Panel {
             horizontalPadding: Style.space(7)
             verticalPadding: Style.space(4)
             bordered: true
-            onClicked: docker.startContainer(row.container.id)
+            onClicked: active.startContainer(row.container.id)
           }
 
           PanelActionButton {
@@ -665,7 +766,7 @@ Panel {
             onClicked: {
               root.logsContainerName = row.container.name
               root.logsViewOpen = true
-              docker.fetchLogs(row.container.id)
+              active.fetchLogs(row.container.id)
             }
           }
 
