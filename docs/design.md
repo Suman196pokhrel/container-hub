@@ -49,8 +49,9 @@ Container Hub never elevates or edits group membership itself.
 manifest.json
 Panel.qml         # bar button + panel UI; manifest entry point
 Service.qml       # Process orchestration: polling, stop/start/rm/logs
-BoundedProcess.qml # Process wrapper: hard deadline, kill, output caps
-Model.js          # pure JS: parse `docker ps` JSON, ports, sorting, errors
+BinaryResolver.qml # Absolute-path resolve+validate (namei chain, dev:ino recheck)
+BoundedProcess.qml # Process wrapper: setsid, group kill, deadline, output caps
+Model.js          # pure JS: parse `docker ps` JSON, ports, sorting, errors, id validation
 ContainerIcon.qml # vector icon (QtQuick.Shapes), theme-colored
 README.md
 docs/design.md    # this file
@@ -64,23 +65,39 @@ which already provides `open()`/`close()`/`toggle()`/`opened` — no separate
 
 ## Data flow
 
-On startup, `Service.qml` resolves `docker` off `PATH` once (`which docker`),
-then validates the resolved path (`stat -L`: must be a regular file, owned
-by root, not group/other-writable) before storing it as `dockerPath`. Every
-later invocation uses that literal absolute path, never a bare `"docker"`
-lookup — `PATH` is attacker-influenceable and the daemon behind this binary
-is root-equivalent, so re-resolving on every call would be a TOCTOU gap.
+On startup, `BinaryResolver.qml` (used by `Service.qml`) checks a fixed list
+of trusted absolute candidate paths (`/usr/bin/docker`, `/usr/local/bin/docker`
+— never `PATH`/`which`, which is itself attacker-influenceable) and validates
+the *entire* path chain — every directory component plus the final binary —
+is root-owned and not group/other-writable, via one `namei -l` call (also
+invoked by hardcoded absolute path). The validated (device, inode) pair is
+cached and **re-checked immediately before every subsequent ps/logs/action
+invocation** via `recheck()`, not just once at startup: the file at that path
+could otherwise be replaced between validation and use (TOCTOU). If a
+recheck ever fails, the plugin drops `dockerPath`, refuses to run anything,
+and re-resolves from scratch.
 
-Every subprocess (`ps`, `stop`/`start`/`rm`, `logs`) runs through
-`BoundedProcess.qml`, not `Quickshell.Io.Process` directly: a hard wall-clock
-deadline (SIGTERM, then SIGKILL if it's still alive 2s later) and a hard cap
-on stored stdout/stderr, so a hung or misbehaving container can't wedge the
-poll loop or grow memory unbounded. See that file's header comment for the
-one real gap: Quickshell's IO layer has no byte-limited reader, so the cap
-bounds *stored* output and, via the deadline, *time*, but not necessarily
-peak memory during a single run that writes one huge unterminated line.
+Every subprocess runs through `BoundedProcess.qml`, not `Quickshell.Io.Process`
+directly: the inner command is wrapped in `setsid` (which execs in place
+here rather than forking, verified live, so the tracked pid is also the new
+process group's id) and a hard wall-clock deadline sends `TERM` then `KILL`
+to that *whole group* — via a short-lived `kill -SIG -<pid>`, not
+`Process.signal()` on the single tracked process — reaching any children the
+tracked process spawns, not just itself. `ps` and `logs` additionally pipe
+through `/usr/bin/head -c <cap>` (`docker <cmd> | head -c N`), so the byte
+cap is enforced by a real OS pipe at the source, not only after
+`StdioCollector` has already buffered the full output — verified live: an
+8MB single-line container log was read with under 5MB peak RSS for the
+entire plugin process, and no leftover `docker`/`sh`/`head` process survived
+a forced kill. The container id embedded in that shell string is
+regex-validated (`Model.isValidContainerId`, plain lowercase hex) before it
+ever reaches the string; `dockerPath` and the (already-clamped) tail-line
+count are the only other values interpolated, and both are our own
+validated/fixed data, never raw external text.
 
-`Service.qml` polls `docker ps -a --format '{{json .}}'`, two-speed:
+`Service.qml` polls `docker ps -a --no-trunc --format '{{json .}}'` (full,
+untruncated ids throughout — a truncated id was previously eligible to reach
+`rm -f`), two-speed:
 
 - fast (`refreshIntervalOpenSec`, default 3s) while the panel is open
 - slow (`refreshIntervalClosedSec`, default 15s) while closed, so the bar
@@ -95,9 +112,13 @@ elevated access right now; if so, the poll is skipped in favor of the
 access-not-set-up state instead of hammering `docker ps` into a guaranteed
 permission error.
 
-Removing a container re-checks the id is still present in the current list
-immediately before firing `docker rm -f`, since time passes between opening
-the confirm dialog and confirming it. Every action surfaces failure (non-zero
+Removing a container queries the daemon fresh (`docker inspect`) immediately
+before firing `docker rm -f`, rather than trusting the polled list — that
+list can be several seconds stale, and time also passes while the confirm
+dialog is open. Verified live: removing a container that was deleted
+*outside* the plugin (so the cached list still showed it as present) was
+correctly refused ("Container is already gone; nothing removed") — the
+cache alone would have proceeded. Every action surfaces failure (non-zero
 exit, timeout, or a container that's already gone) as a dismissible message
 instead of silently refreshing either way.
 
@@ -115,8 +136,15 @@ instead of silently refreshing either way.
 (`0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp`) — `Model.js` dedupes those
 to one logical port mapping.
 
-All process commands are argv arrays (`["docker", "stop", id]`), never
-shell-interpolated strings.
+Every command is still an argv array, with one deliberate, narrow exception:
+`ps` and `logs` go through `/bin/sh -c "<cmd> | head -c N"` for the
+producer-side byte limiting described above, since Quickshell's `Process`
+has no built-in piping. The only externally-influenced value ever placed in
+that shell string (a container id) is regex-validated first — see
+`Model.isValidContainerId` and `tests/model.test.js`; a value that doesn't
+match is rejected before it ever reaches the string, never escaped-and-hoped.
+`stop`/`start`/`rm` stay plain argv (no shell) since their output isn't
+attacker-length-controlled the way logs are.
 
 Colors come from the shell's own theme tokens (`Color.accent` for running,
 `Color.muted` for stopped, `Color.urgent` for unhealthy/errors) so the

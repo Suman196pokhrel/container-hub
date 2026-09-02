@@ -13,6 +13,15 @@ function clamp(value, maxLen) {
   return text.length > maxLen ? text.substring(0, maxLen) : text
 }
 
+// Docker/Podman container IDs are always lowercase hex, up to 64 chars
+// (the full, untruncated form — see --no-trunc in Service.qml). Anything
+// that reaches a shell string (the log-fetch pipeline) is gated through
+// this first, so a value that doesn't match this exact shape is never
+// substituted into shell text.
+function isValidContainerId(id) {
+  return /^[0-9a-f]{1,64}$/.test(String(id || ""))
+}
+
 function parsePorts(portsRaw) {
   var text = String(portsRaw || "").trim()
   if (!text) return []
@@ -116,6 +125,7 @@ function classifyDockerError(dockerAvailable, stderrText) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    isValidContainerId: isValidContainerId,
     parsePorts: parsePorts,
     formatPortsDisplay: formatPortsDisplay,
     parseContainerLine: parseContainerLine,

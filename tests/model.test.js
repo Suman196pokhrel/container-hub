@@ -113,6 +113,21 @@ test('classifyDockerError falls back to unknown with a truncated message', () =>
   assert.equal(result.message, 'some other failure')
 })
 
+test('isValidContainerId accepts full-length and short hex ids', () => {
+  assert.equal(Model.isValidContainerId('d187d155b275'), true)
+  assert.equal(Model.isValidContainerId('a'.repeat(64)), true)
+})
+
+test('isValidContainerId rejects anything that is not plain lowercase hex', () => {
+  assert.equal(Model.isValidContainerId(''), false)
+  assert.equal(Model.isValidContainerId('a'.repeat(65)), false) // too long
+  assert.equal(Model.isValidContainerId('ABCDEF'), false) // uppercase
+  assert.equal(Model.isValidContainerId('abc; rm -rf /'), false)
+  assert.equal(Model.isValidContainerId('abc | head'), false)
+  assert.equal(Model.isValidContainerId('$(whoami)'), false)
+  assert.equal(Model.isValidContainerId(null), false)
+})
+
 test('parseContainerLine clamps oversized fields instead of storing them whole', () => {
   const huge = 'x'.repeat(Model.MAX_FIELD_LEN + 5000)
   const line = JSON.stringify({
