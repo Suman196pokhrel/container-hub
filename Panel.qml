@@ -224,7 +224,14 @@ Panel {
                 fontSize: Style.font.subtitle
                 size: Style.space(24)
                 bordered: true
-                onClicked: Quickshell.execDetached(["omarchy-launch-docker-tui"])
+                // omarchy-launch-docker-tui execs lazydocker directly with
+                // no terminal of its own (confirmed against its .desktop
+                // entry and Hyprland keybinding, both of which wrap it in
+                // xdg-terminal-exec) — run bare via execDetached, lazydocker
+                // fails on "open /dev/tty: no such device" with no visible
+                // feedback at all. omarchy-launch-tui is the terminal
+                // wrapper, same as the "Enable Docker access" button below.
+                onClicked: Quickshell.execDetached(["omarchy-launch-tui", "omarchy-launch-docker-tui"])
               }
 
               PanelActionButton {
@@ -424,7 +431,7 @@ Panel {
             fontSize: Style.font.subtitle
             bordered: true
             tooltipText: "Open in lazydocker"
-            onClicked: Quickshell.execDetached(["omarchy-launch-docker-tui"])
+            onClicked: Quickshell.execDetached(["omarchy-launch-tui", "omarchy-launch-docker-tui"])
           }
         }
 
