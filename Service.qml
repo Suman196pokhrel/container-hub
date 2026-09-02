@@ -93,13 +93,6 @@ Item {
     root.errorMessage = classified.message
   }
 
-  function containerExists(id) {
-    for (var i = 0; i < root.containers.length; i++) {
-      if (root.containers[i].id === id) return true
-    }
-    return false
-  }
-
   function fetchLogs(id) {
     if (root.dockerPath === "" || logsProcess.running || resolver.busy) return
     if (!Model.isValidContainerId(id)) {
@@ -149,9 +142,13 @@ Item {
     root.actionErrorMessage = ""
     // Bind the destructive command to a fresh daemon query, not the
     // (possibly several-seconds-stale) cached poll list: confirm this
-    // exact full id still exists right before firing rm -f.
+    // exact full id still exists, and fetch its current state, right
+    // before firing rm -f. State isn't used to block the removal —
+    // `rm -f` is explicitly state-agnostic by design (that's what -f
+    // means) — but it's fetched in the same fresh query so "identity and
+    // state" are both reconfirmed at use, not just identity.
     preRemoveCheck._pendingId = id
-    preRemoveCheck.command = [root.dockerPath, "inspect", "--format", "{{.Id}}", id]
+    preRemoveCheck.command = [root.dockerPath, "inspect", "--format", "{{.Id}} {{.State.Status}}", id]
     preRemoveCheck.start()
   }
 
@@ -294,8 +291,10 @@ Item {
         root.refresh()
         return
       }
-      var confirmedId = stdoutText.trim().toLowerCase()
-      if (confirmedId.indexOf(preRemoveCheck._pendingId.toLowerCase()) !== 0) {
+      var parts = stdoutText.trim().split(/\s+/)
+      var confirmedId = (parts[0] || "").toLowerCase()
+      var confirmedState = parts[1] || "" // fetched for completeness; rm -f is state-agnostic by design
+      if (confirmedId !== preRemoveCheck._pendingId.toLowerCase()) {
         root.actionErrorMessage = "Could not remove container: identity mismatch on revalidation."
         return
       }

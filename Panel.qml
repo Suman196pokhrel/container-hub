@@ -443,14 +443,13 @@ Panel {
         foreground: root.bar.foreground
         onCanceled: root.confirmRemoveOpen = false
         onConfirmed: {
-          // The list can have refreshed since this dialog opened; re-check
-          // the immutable id is still present rather than firing `rm -f`
-          // blind at whatever was true when the dialog was opened.
-          if (docker.containerExists(root.pendingRemoveId)) {
-            docker.removeContainer(root.pendingRemoveId)
-          } else {
-            docker.actionErrorMessage = "\"" + root.pendingRemoveName + "\" is already gone; nothing removed."
-          }
+          // removeContainer() itself re-queries the daemon fresh (not the
+          // polled list, which can be stale) immediately before firing
+          // `rm -f` — see Service.qml. Gating the call here on the cached
+          // containerExists() first would make that fresh check
+          // unreachable whenever the cache happened to be stale in the
+          // wrong direction.
+          docker.removeContainer(root.pendingRemoveId)
           root.confirmRemoveOpen = false
         }
       }
