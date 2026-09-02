@@ -5,7 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "engines/shared.js" as Shared
 
 Panel {
   id: root
@@ -543,7 +543,7 @@ Panel {
   component ContainerRow: BorderSurface {
     id: row
     property var container: null
-    readonly property string colorKey: Model.statusColorFor(container)
+    readonly property string colorKey: Shared.statusColorFor(container)
     readonly property color stateColor: colorKey === "running" ? Color.accent : (colorKey === "unhealthy" ? Color.urgent : Color.muted)
     readonly property string stateLabel: {
       if (!container) return ""
@@ -748,7 +748,7 @@ Panel {
 
     visible: ports.length > 0
     enabled: hasHostPort
-    text: Model.formatPortsDisplay(ports)
+    text: Shared.formatPortsDisplay(ports)
     tooltipText: hasHostPort ? "Open localhost:" + hostPorts[0].hostPort : ""
     foreground: hasHostPort ? Color.accent : root.secondaryText
     accent: hasHostPort ? Color.accent : root.bar.foreground
