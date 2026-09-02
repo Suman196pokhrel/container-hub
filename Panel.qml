@@ -50,8 +50,9 @@ Panel {
     }
   }
 
-  Service {
+  ContainerEngine {
     id: docker
+    engineName: "docker"
     settings: root.settings
   }
 
