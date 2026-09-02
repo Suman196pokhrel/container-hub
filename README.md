@@ -10,9 +10,9 @@ final polish, performance work, and reliability optimizations.
 
 ## Preview
 
-![Container Hub on the Omarchy desktop](docs/assets/container-hub-desktop.png)
+![Container Hub on the Omarchy desktop](docs/assets/container-hub-desktop.png?v=2)
 
-![Container Hub popup](docs/assets/container-hub-popup.png)
+![Container Hub popup](docs/assets/container-hub-popup.png?v=2)
 
 ## Features
 
